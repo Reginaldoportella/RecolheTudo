@@ -40,7 +40,6 @@ const AppNavigator = () => {
             height: 65,
             paddingBottom: 10,
           },
-          headerTitleAlign: 'center',
         })}
       >
         <Tab.Screen name="Início" component={HomeScreen} />
