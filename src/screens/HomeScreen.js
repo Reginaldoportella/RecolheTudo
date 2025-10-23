@@ -5,7 +5,6 @@ import globalStyles from '../styles/globalStyles';
 import colors from '../styles/colors';
 
 const HomeScreen = ({ navigation }) => {
-  // Dados de exemplo
   const todaySummary = {
     paper: 5.2,
     plastic: 3.8,
@@ -29,7 +28,7 @@ const HomeScreen = ({ navigation }) => {
           <Text style={styles.totalValue}>{totalKg.toFixed(1)} kg</Text>
           <Text style={styles.totalLabel}>TOTAL COLETADO</Text>
         </View>
-        
+
         <View style={styles.materialsContainer}>
           <View style={styles.materialItem}>
             <View style={[styles.materialIcon, { backgroundColor: colors.paper }]}>
@@ -38,7 +37,7 @@ const HomeScreen = ({ navigation }) => {
             <Text style={styles.materialValue}>{todaySummary.paper.toFixed(1)} kg</Text>
             <Text style={styles.materialLabel}>Papel</Text>
           </View>
-          
+
           <View style={styles.materialItem}>
             <View style={[styles.materialIcon, { backgroundColor: colors.plastic }]}>
               <Ionicons name="water" size={24} color="white" />
@@ -46,7 +45,7 @@ const HomeScreen = ({ navigation }) => {
             <Text style={styles.materialValue}>{todaySummary.plastic.toFixed(1)} kg</Text>
             <Text style={styles.materialLabel}>Plástico</Text>
           </View>
-          
+
           <View style={styles.materialItem}>
             <View style={[styles.materialIcon, { backgroundColor: colors.metal }]}>
               <Ionicons name="hardware-chip" size={24} color="white" />
@@ -54,7 +53,7 @@ const HomeScreen = ({ navigation }) => {
             <Text style={styles.materialValue}>{todaySummary.metal.toFixed(1)} kg</Text>
             <Text style={styles.materialLabel}>Metal</Text>
           </View>
-          
+
           <View style={styles.materialItem}>
             <View style={[styles.materialIcon, { backgroundColor: colors.glass }]}>
               <Ionicons name="wine" size={24} color="white" />
@@ -65,24 +64,25 @@ const HomeScreen = ({ navigation }) => {
         </View>
       </View>
 
-      <TouchableOpacity 
+      <TouchableOpacity
         style={[globalStyles.largeButton, { backgroundColor: colors.primary }]}
         onPress={() => navigation.navigate('Coleta')}
       >
         <Text style={globalStyles.largeButtonText}>REGISTRAR COLETA</Text>
       </TouchableOpacity>
-      
-      <TouchableOpacity 
+
+      <TouchableOpacity
         style={[globalStyles.largeButton, { backgroundColor: colors.secondary }]}
         onPress={() => navigation.navigate('Rotas')}
       >
         <Text style={globalStyles.largeButtonText}>VER ROTA DE HOJE</Text>
       </TouchableOpacity>
-      
+
       <View style={[globalStyles.card, styles.tipsCard]}>
         <Text style={styles.cardTitle}>DICA DO DIA</Text>
         <Text style={styles.tipText}>
-          Separe os materiais por tipo durante a coleta para facilitar a pesagem e aumentar o valor recebido!
+          Separe os materiais por tipo durante a coleta para facilitar a pesagem e aumentar o valor
+          recebido!
         </Text>
       </View>
     </ScrollView>

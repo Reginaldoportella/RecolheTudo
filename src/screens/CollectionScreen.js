@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, ScrollView, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import globalStyles from '../styles/globalStyles';
@@ -9,13 +9,13 @@ import MaterialButton from '../components/MaterialButton';
 const CollectionScreen = ({ navigation }) => {
   const [selectedMaterial, setSelectedMaterial] = useState(null);
   const [estimatedWeight, setEstimatedWeight] = useState(null);
-  
+
   const materials = [
-    { id: 'papel', name: 'PAPEL', icon: require('../../assets/icons/papel.png') },
-    { id: 'plastico', name: 'PLÁSTICO', icon: require('../../assets/icons/plastico.png') },
-    { id: 'metal', name: 'METAL', icon: require('../../assets/icons/metal.png') },
-    { id: 'vidro', name: 'VIDRO', icon: require('../../assets/icons/vidro.png') },
-    { id: 'outros', name: 'OUTROS', icon: require('../../assets/icons/outros.png') },
+    { id: 'papel', label: 'Papel', iconName: 'document-text-outline' },
+    { id: 'plastico', label: 'Plástico', iconName: 'water-outline' },
+    { id: 'metal', label: 'Metal', iconName: 'construct-outline' },
+    { id: 'vidro', label: 'Vidro', iconName: 'wine-outline' },
+    { id: 'outros', label: 'Outros', iconName: 'cube-outline' },
   ];
 
   const weights = [
@@ -34,19 +34,21 @@ const CollectionScreen = ({ navigation }) => {
   };
 
   const handleConfirmCollection = async () => {
+    if (!selectedMaterial || !estimatedWeight) {
+      Alert.alert('Selecione o material e o peso', 'Você precisa informar o material e o peso estimado.');
+      return;
+    }
+
     try {
-      // Solicitar permissão de localização
       const { status } = await Location.requestForegroundPermissionsAsync();
-      
+
       if (status !== 'granted') {
         Alert.alert('Permissão necessária', 'Precisamos da sua localização para registrar a coleta.');
         return;
       }
-      
-      // Obter localização atual
+
       const location = await Location.getCurrentPositionAsync({});
-      
-      // Dados da coleta
+
       const collectionData = {
         material: selectedMaterial.id,
         weight: estimatedWeight.value,
@@ -56,26 +58,22 @@ const CollectionScreen = ({ navigation }) => {
         },
         timestamp: new Date().toISOString(),
       };
-      
-      // Aqui você salvaria os dados no armazenamento local
+
       console.log('Dados da coleta:', collectionData);
-      
-      // Mostrar confirmação
+
       Alert.alert(
         'Coleta Registrada!',
-        `Material: ${selectedMaterial.name}\nPeso: ${estimatedWeight.value}kg\nRegistrado com sucesso!`,
+        `Material: ${selectedMaterial.label}\nPeso: ${estimatedWeight.value}kg\nRegistrado com sucesso!`,
         [
-          { 
-            text: 'OK', 
+          {
+            text: 'OK',
             onPress: () => {
-              // Resetar seleções
               setSelectedMaterial(null);
               setEstimatedWeight(null);
-              // Voltar para a tela inicial
               navigation.navigate('Início');
-            } 
+            },
           },
-        ]
+        ],
       );
     } catch (error) {
       Alert.alert('Erro', 'Não foi possível registrar a coleta. Tente novamente.');
@@ -83,18 +81,18 @@ const CollectionScreen = ({ navigation }) => {
     }
   };
 
-  // Render da seleção de material
   if (!selectedMaterial) {
     return (
       <ScrollView style={globalStyles.container}>
         <Text style={globalStyles.heading}>QUE MATERIAL VOCÊ COLETOU?</Text>
-        
+
         <View style={styles.materialsGrid}>
           {materials.map((material) => (
             <MaterialButton
               key={material.id}
-              material={material.id}
-              icon={material.icon}
+              materialId={material.id}
+              label={material.label.toUpperCase()}
+              iconName={material.iconName}
               onPress={() => handleMaterialSelect(material)}
             />
           ))}
@@ -102,8 +100,7 @@ const CollectionScreen = ({ navigation }) => {
       </ScrollView>
     );
   }
-  
-  // Render da seleção de peso
+
   if (selectedMaterial && !estimatedWeight) {
     return (
       <ScrollView style={globalStyles.container}>
@@ -111,20 +108,14 @@ const CollectionScreen = ({ navigation }) => {
           <TouchableOpacity onPress={() => setSelectedMaterial(null)}>
             <Ionicons name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
-          <Text style={globalStyles.heading}>QUANTO VOCÊ COLETOU?</Text>
+          <Text style={[globalStyles.heading, styles.headerTitle]}>QUANTO VOCÊ COLETOU?</Text>
         </View>
-        
-        <Text style={styles.selectedMaterial}>
-          Material: {selectedMaterial.name}
-        </Text>
-        
+
+        <Text style={styles.selectedMaterial}>Material: {selectedMaterial.label}</Text>
+
         <View style={styles.weightsContainer}>
           {weights.map((weight) => (
-            <TouchableOpacity
-              key={weight.id}
-              style={styles.weightOption}
-              onPress={() => handleWeightSelect(weight)}
-            >
+            <TouchableOpacity key={weight.id} style={styles.weightOption} onPress={() => handleWeightSelect(weight)}>
               <Text style={styles.weightEmoji}>{weight.image}</Text>
               <Text style={styles.weightLabel}>{weight.label}</Text>
               <Text style={styles.weightValue}>{weight.value} kg</Text>
@@ -135,42 +126,41 @@ const CollectionScreen = ({ navigation }) => {
       </ScrollView>
     );
   }
-  
-  // Render da confirmação
+
   return (
     <View style={globalStyles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => setEstimatedWeight(null)}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={globalStyles.heading}>CONFIRMAR COLETA</Text>
+        <Text style={[globalStyles.heading, styles.headerTitle]}>CONFIRMAR COLETA</Text>
       </View>
-      
+
       <View style={[globalStyles.card, styles.confirmationCard]}>
         <View style={styles.confirmationItem}>
           <Text style={styles.confirmationLabel}>Material:</Text>
-          <Text style={styles.confirmationValue}>{selectedMaterial.name}</Text>
+          <Text style={styles.confirmationValue}>{selectedMaterial.label}</Text>
         </View>
-        
+
         <View style={styles.confirmationItem}>
           <Text style={styles.confirmationLabel}>Peso Estimado:</Text>
           <Text style={styles.confirmationValue}>{estimatedWeight.value} kg</Text>
         </View>
-        
+
         <View style={styles.confirmationItem}>
           <Text style={styles.confirmationLabel}>Local:</Text>
           <Text style={styles.confirmationValue}>Posição atual</Text>
         </View>
       </View>
-      
-      <TouchableOpacity 
+
+      <TouchableOpacity
         style={[globalStyles.largeButton, { backgroundColor: colors.success }]}
         onPress={handleConfirmCollection}
       >
         <Text style={globalStyles.largeButtonText}>CONFIRMAR COLETA</Text>
       </TouchableOpacity>
-      
-      <TouchableOpacity 
+
+      <TouchableOpacity
         style={[globalStyles.largeButton, { backgroundColor: colors.error }]}
         onPress={() => setSelectedMaterial(null)}
       >
@@ -191,6 +181,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 20,
+  },
+  headerTitle: {
+    marginLeft: 12,
   },
   selectedMaterial: {
     fontSize: 18,

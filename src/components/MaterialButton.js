@@ -1,26 +1,28 @@
 import React from 'react';
-import { TouchableOpacity, Text, Image, StyleSheet, View } from 'react-native';
+import { TouchableOpacity, Text, StyleSheet } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import colors from '../styles/colors';
 
-const MaterialButton = ({ material, icon, onPress }) => {
-  // Mapeia material para cor correspondente
+const MaterialButton = ({ materialId, label, iconName, onPress }) => {
   const getMaterialColor = (type) => {
     switch (type) {
-      case 'papel': return colors.paper;
-      case 'plastico': return colors.plastic;
-      case 'metal': return colors.metal;
-      case 'vidro': return colors.glass;
-      default: return colors.other;
+      case 'papel':
+        return colors.paper;
+      case 'plastico':
+        return colors.plastic;
+      case 'metal':
+        return colors.metal;
+      case 'vidro':
+        return colors.glass;
+      default:
+        return colors.other;
     }
   };
 
   return (
-    <TouchableOpacity
-      style={[styles.button, { backgroundColor: getMaterialColor(material) }]}
-      onPress={onPress}
-    >
-      <Image source={icon} style={styles.icon} />
-      <Text style={styles.text}>{material.toUpperCase()}</Text>
+    <TouchableOpacity style={[styles.button, { backgroundColor: getMaterialColor(materialId) }]} onPress={onPress}>
+      <Ionicons name={iconName} size={48} color={colors.textLight} style={styles.icon} />
+      <Text style={styles.text}>{label}</Text>
     </TouchableOpacity>
   );
 };
@@ -36,8 +38,6 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   icon: {
-    width: 80,
-    height: 80,
     marginBottom: 10,
   },
   text: {
