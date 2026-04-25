@@ -1,5 +1,5 @@
-import { StyleSheet } from 'react-native';
-import colors from './colors';
+import { StyleSheet } from "react-native";
+import colors from "./colors";
 
 export const globalStyles = StyleSheet.create({
   container: {
@@ -9,7 +9,7 @@ export const globalStyles = StyleSheet.create({
   },
   heading: {
     fontSize: 24,
-    fontWeight: 'bold',
+    fontWeight: "bold",
     color: colors.text,
     marginBottom: 16,
   },
@@ -17,24 +17,24 @@ export const globalStyles = StyleSheet.create({
     backgroundColor: colors.primary,
     padding: 20,
     borderRadius: 10,
-    alignItems: 'center',
+    alignItems: "center",
     marginVertical: 10,
   },
   largeButtonText: {
     color: colors.textLight,
     fontSize: 20,
-    fontWeight: 'bold',
+    fontWeight: "bold",
   },
   card: {
-    backgroundColor: '#fff',
+    backgroundColor: "#fff",
     borderRadius: 10,
     padding: 16,
     marginVertical: 8,
     elevation: 3,
   },
   row: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     marginVertical: 5,
   },
   materialIcon: {
@@ -45,7 +45,7 @@ export const globalStyles = StyleSheet.create({
   },
   materialIconText: {
     fontSize: 16,
-    textAlign: 'center',
+    textAlign: "center",
     marginTop: 5,
   },
 });
