@@ -1,0 +1,97 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: recolhetudo-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - recolhetudo-postgres-data:/var/lib/postgresql/data
+    networks:
+      - recolhetudo-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: recolhetudo-backend
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3001
+      USE_OSRM: "true"
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "3001:3001"
+    depends_on:
+      - postgres
+    networks:
+      - recolhetudo-network
+
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: recolhetudo-test
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - ./coverage:/app/coverage
+    environment:
+      NODE_ENV: test
+      CI: "true"
+    command: sh -c "npm run typecheck && npm test -- --coverage"
+    networks:
+      - recolhetudo-network
+
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: recolhetudo
+    volumes:
+      - .:/app
+      - /app/node_modules
+    environment:
+      NODE_ENV: development
+      CI: "false"
+      EXPO_PUBLIC_API_BASE_URL: ${EXPO_PUBLIC_API_BASE_URL:-http://localhost:3001}
+    command: npx expo start --web --host 0.0.0.0 --port 8081
+    ports:
+      - "8081:8081"
+      - "19000:19000"
+      - "19001:19001"
+      - "19002:19002"
+    depends_on:
+      - backend
+    networks:
+      - recolhetudo-network
+    stdin_open: true
+    tty: true
+
+  build:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: recolhetudo-build
+    volumes:
+      - .:/app
+      - /app/node_modules
+    environment:
+      NODE_ENV: production
+    command: npm run typecheck
+    networks:
+      - recolhetudo-network
+
+networks:
+  recolhetudo-network:
+    driver: bridge
+
+volumes:
+  recolhetudo-postgres-data:
