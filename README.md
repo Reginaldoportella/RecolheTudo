@@ -135,7 +135,7 @@ RecolheTudo/
 
 - [Node.js](https://nodejs.org/) 20+
 - [npm](https://www.npmjs.com/) 10+
-- [Expo CLI](https://docs.expo.dev/get-started/installation/) (`npm install -g expo-cli`) ou `npx expo`
+- `npx expo` (não use o `expo-cli` global legado)
 - Para testar no celular: app **Expo Go** ([Android](https://play.google.com/store/apps/details?id=host.exp.exponent) / [iOS](https://apps.apple.com/app/expo-go/id982107779))
 
 ---
@@ -147,11 +147,14 @@ RecolheTudo/
 git clone https://github.com/<seu-usuario>/RecolheTudo.git
 cd RecolheTudo
 
+# Configure as variáveis locais
+cp .env.example .env
+
 # Instale as dependências
 npm install
 
 # Inicie o servidor de desenvolvimento
-npm start
+npx expo start
 ```
 
 Após iniciar, escaneie o QR code com o Expo Go ou pressione:
@@ -168,8 +171,27 @@ Após iniciar, escaneie o QR code com o Expo Go ou pressione:
 | `android` | `expo start --android` | Abre no Android |
 | `ios` | `expo start --ios` | Abre no iOS |
 | `web` | `expo start --web` | Abre no navegador |
+| `backend:dev` | `npm --prefix backend run dev` | Sobe a API local |
 | `typecheck` | `tsc --noEmit` | Verifica erros de tipo sem compilar |
 | `test` | `jest` | Executa os testes unitários |
+
+---
+
+## Configuração de Ambiente
+
+O repositório versiona apenas `.env.example`.
+
+Arquivos e credenciais locais ficam em:
+
+- `.env` para desenvolvimento local
+- variáveis de ambiente do shell ou do Docker
+
+Antes de publicar no GitHub:
+
+- não comite `.env`
+- não comite bancos `.db` ou `.sqlite`
+- não comite logs, caches ou dumps
+- mantenha senhas e URLs sensíveis fora do código
 
 ---
 

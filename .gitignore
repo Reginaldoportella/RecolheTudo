@@ -2,10 +2,14 @@
 
 # dependencies
 node_modules/
+backend/node_modules/
 
 # Expo
 .expo/
+backend/.expo/
 dist/
+dist-web-check/
+dist-web-check-debug/
 web-build/
 expo-env.d.ts
 
@@ -25,13 +29,28 @@ expo-env.d.ts
 npm-debug.*
 yarn-debug.*
 yarn-error.*
+*.log
+logs/
+coverage/
 
 # macOS
 .DS_Store
 *.pem
 
 # local env files
-.env*.local
+.env
+.env.*
+!.env.example
 
 # typescript
 *.tsbuildinfo
+
+# local databases and runtime artifacts
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-wal
+*.db-shm
+tmp/
+temp/
