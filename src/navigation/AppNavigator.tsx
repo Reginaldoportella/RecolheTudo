@@ -1,10 +1,12 @@
 import React from "react";
+import { Platform } from "react-native";
 import { NavigationContainer } from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { Ionicons } from "@expo/vector-icons";
 
 import HomeScreen from "../screens/HomeScreen";
 import CollectionScreen from "../screens/CollectionScreen";
+import HistoryScreen from "../screens/HistoryScreen";
 import RoutesScreen from "../screens/RoutesScreen";
 import ProfileScreen from "../screens/ProfileScreen";
 import colors from "../styles/colors";
@@ -19,10 +21,12 @@ function getTabIconName(
   focused: boolean,
 ): IconName {
   switch (routeName) {
-    case "Início":
+    case "Inicio":
       return focused ? "home" : "home-outline";
     case "Coleta":
       return focused ? "add-circle" : "add-circle-outline";
+    case "Historico":
+      return focused ? "time" : "time-outline";
     case "Rotas":
       return focused ? "map" : "map-outline";
     case "Perfil":
@@ -45,18 +49,45 @@ const AppNavigator = (): React.JSX.Element => {
             />
           ),
           tabBarActiveTintColor: colors.primary,
-          tabBarInactiveTintColor: "gray",
+          tabBarInactiveTintColor: colors.textMuted,
+          headerShown: false,
           tabBarLabelStyle: {
-            fontSize: 14,
+            fontSize: 11,
+            fontWeight: "700",
           },
           tabBarStyle: {
-            height: 65,
+            height: 74,
+            paddingTop: 10,
             paddingBottom: 10,
+            backgroundColor: colors.surface,
+            borderTopWidth: 1,
+            borderTopColor: colors.border,
+            ...Platform.select({
+              web: {
+                boxShadow: "0 -10px 30px rgba(24, 33, 27, 0.08)",
+              },
+              default: {
+                shadowColor: "#18211B",
+                shadowOffset: { width: 0, height: -6 },
+                shadowOpacity: 0.06,
+                shadowRadius: 14,
+                elevation: 12,
+              },
+            }),
           },
         })}
       >
-        <Tab.Screen name="Início" component={HomeScreen} />
+        <Tab.Screen
+          name="Inicio"
+          component={HomeScreen}
+          options={{ tabBarLabel: "Inicio" }}
+        />
         <Tab.Screen name="Coleta" component={CollectionScreen} />
+        <Tab.Screen
+          name="Historico"
+          component={HistoryScreen}
+          options={{ tabBarLabel: "Historico" }}
+        />
         <Tab.Screen name="Rotas" component={RoutesScreen} />
         <Tab.Screen name="Perfil" component={ProfileScreen} />
       </Tab.Navigator>

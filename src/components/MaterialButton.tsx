@@ -1,5 +1,5 @@
 import React from "react";
-import { TouchableOpacity, Text, StyleSheet } from "react-native";
+import { TouchableOpacity, Text, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import colors from "../styles/colors";
 import type { Material } from "../domain/types/collection";
@@ -33,37 +33,47 @@ const MaterialButton = ({
   onPress,
 }: MaterialButtonProps): React.JSX.Element => (
   <TouchableOpacity
-    style={[styles.button, { backgroundColor: getMaterialColor(material) }]}
+    style={styles.button}
     onPress={onPress}
   >
-    <Ionicons
-      name={iconName}
-      size={64}
-      color={colors.textLight}
-      style={styles.icon}
-    />
+    <View
+      style={[styles.iconWrap, { backgroundColor: getMaterialColor(material) }]}
+    >
+      <Ionicons name={iconName} size={28} color={colors.textLight} />
+    </View>
     <Text style={styles.text}>{label ?? material.toUpperCase()}</Text>
+    <Text style={styles.caption}>Toque para registrar</Text>
   </TouchableOpacity>
 );
 
 const styles = StyleSheet.create({
   button: {
-    width: 150,
-    height: 150,
-    justifyContent: "center",
-    alignItems: "center",
-    borderRadius: 15,
-    margin: 10,
-    elevation: 4,
+    width: "47%",
+    minWidth: 145,
+    backgroundColor: colors.surface,
+    borderRadius: 22,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
-  icon: {
-    marginBottom: 10,
+  iconWrap: {
+    width: 54,
+    height: 54,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 16,
   },
   text: {
-    color: colors.textLight,
+    color: colors.text,
     fontSize: 18,
-    fontWeight: "bold",
-    textAlign: "center",
+    fontWeight: "800",
+  },
+  caption: {
+    color: colors.textMuted,
+    fontSize: 13,
+    marginTop: 6,
   },
 });
 

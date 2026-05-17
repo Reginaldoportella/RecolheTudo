@@ -25,3 +25,8 @@ declare module "./vendor/react-native-vector-icons/lib/create-icon-set" {
     fontFile?: string,
   ): IconSet;
 }
+
+declare module "*.css" {
+  const content: Record<string, string>;
+  export default content;
+}
