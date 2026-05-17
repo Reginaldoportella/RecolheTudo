@@ -1,298 +1,230 @@
 # RecolheTudo
 
-Aplicativo mobile offline-first para catadores de materiais recicláveis registrarem coletas, acompanharem o progresso diário e visualizarem o histórico de trabalho.
+Aplicativo Expo/React Native para registro de coletas de recicláveis com foco em operação offline-first, persistência local em SQLite e evolução gradual para backend centralizado.
 
----
+## Visão geral
 
-## Sumário
+O projeto hoje combina duas camadas:
 
-- [Visão Geral](#visão-geral)
-- [Funcionalidades](#funcionalidades)
-- [Stack Técnica](#stack-técnica)
-- [Arquitetura](#arquitetura)
-- [Estrutura de Pastas](#estrutura-de-pastas)
-- [Pré-requisitos](#pré-requisitos)
-- [Instalação](#instalação)
-- [Scripts Disponíveis](#scripts-disponíveis)
-- [Banco de Dados](#banco-de-dados)
-- [Testes](#testes)
-- [CI/CD](#cicd)
-- [Configuração TypeScript](#configuração-typescript)
+- cliente mobile/web em Expo
+- backend HTTP Node em `backend/` com PostgreSQL
 
----
+O app continua operando com SQLite local como fonte operacional imediata. Quando o backend está disponível, ele passa a apoiar sincronização, pontos próximos, planejamento de rotas e inspeção de saúde.
 
-## Visão Geral
+## Estado atual
 
-O **RecolheTudo** foi projetado para funcionar 100% offline. Todos os dados são persistidos localmente via SQLite (expo-sqlite). A geolocalização é capturada automaticamente no momento do registro e armazenada junto à coleta, permitindo rastrear onde cada material foi coletado.
+### Frontend e telas
 
----
+- `Inicio`: resumo diário e semanal, atalhos de ação e estados de UX
+- `Coleta`: fluxo guiado para registrar material, peso e localização
+- `Historico`: lista de coletas com filtro por material e exclusão local
+- `Rotas`: mapa com pontos próximos, rota sugerida e abertura no Google Maps
+- `Perfil`: meta diária, resumo semanal e inspeção do banco local e do backend
 
-## Funcionalidades
+### Sync e SQLite
 
-| Tela | Descrição |
-|---|---|
-| **Início** | Dashboard diário com total coletado em kg, breakdown por material (papel, plástico, metal, vidro, outros) e estados de UX (loading, empty, error com retry) |
-| **Coleta** | Fluxo guiado em 3 etapas: escolha do material → estimativa de peso → confirmação com geolocalização automática |
-| **Rotas** | Planejamento de rotas de coleta *(em desenvolvimento)* |
-| **Perfil** | Dados do catador e configurações *(em desenvolvimento)* |
+- SQLite local em `src/data/database.ts`
+- coletas persistem `remote_id`, `sync_status` e `last_synced_at`
+- fila local `sync_queue` para operações pendentes
+- sincronização atual é best-effort
 
----
+### Backend
 
-## Stack Técnica
+Endpoints já implementados:
 
-| Camada | Tecnologia | Versão |
-|---|---|---|
-| Runtime | React Native | 0.79.6 |
-| Framework | Expo SDK | ~53.0.27 |
-| Linguagem | TypeScript (strict) | ~5.8.3 |
-| Banco de dados | expo-sqlite | ~15.2.14 |
-| Gerenciamento de estado | Zustand | ^5.0.8 |
-| Navegação | React Navigation (bottom-tabs) | ^7.x |
-| Geolocalização | expo-location | ~18.1.6 |
-| Testes | Jest + jest-expo | ^29.7.0 / ~53.0.9 |
+- `GET /health`
+- `POST /v1/collections/sync`
+- `GET /v1/collections`
+- `DELETE /v1/collections/:remoteId`
+- `GET /v1/collection-points/nearby`
+- `POST /v1/routes/plan`
+- `GET /v1/analytics/daily-summary`
+- `GET /v1/analytics/weekly-summary`
 
----
+### Docker e infraestrutura
 
-## Arquitetura
+- `docker-compose.yml` sobe `postgres`, `backend` e `dev`
+- `backend/` usa PostgreSQL via variáveis de ambiente
+- o repositório versiona apenas `.env.example`
 
-O projeto segue uma arquitetura em camadas com separação clara de responsabilidades:
+## Estrutura principal
 
-```
-Telas (screens)
-    │
-    ▼
-Store Zustand (state)        ← orquestração de casos de uso, cache por data
-    │
-    ├── Validação (validation) ← regras de negócio, lança ValidationError
-    │
-    └── Repository (data)    ← acesso ao SQLite, sem regra de negócio
-            │
-            ▼
-        Database (data)      ← singleton SQLite com migrações versionadas
-```
-
-**Fluxo de registro de coleta:**
-1. Tela chama `registerCollection(input)` na store
-2. Store solicita permissão de localização → captura coordenadas (com fallback `null`)
-3. `validateCollection(input)` é chamado — lança `ValidationError` se inválido
-4. `collectionsRepository.insertCollection(input)` persiste no SQLite
-5. Cache da data atual é invalidado → `loadHome` recarrega o resumo
-
----
-
-## Estrutura de Pastas
-
-```
+```text
 RecolheTudo/
-├── App.tsx                        # Entrypoint do app
-├── index.js                       # Entrypoint Expo (não migrado para TS por convenção)
-├── app.json                       # Configurações Expo (nome, ícone, splash, bundle ID)
-├── tsconfig.json                  # TypeScript strict mode
-├── jest.config.js                 # Configuração Jest
-├── babel.config.js                # Configuração Babel/Expo
-├── .github/
-│   └── workflows/
-│       └── ci.yml                 # Pipeline de CI (typecheck + testes)
-├── assets/                        # Ícones e imagens do app
-└── src/
-    ├── components/
-    │   └── MaterialButton.tsx     # Botão colorido por tipo de material
-    ├── data/
-    │   ├── database.ts            # Singleton SQLite + migrações versionadas
-    │   └── repositories/
-    │       ├── collectionsRepository.ts
-    │       └── __tests__/
-    │           └── collectionsRepository.test.ts
-    ├── domain/
-    │   ├── errors/
-    │   │   └── validationError.ts # Classe ValidationError tipada
-    │   └── types/
-    │       └── collection.ts      # Contratos centrais de domínio
-    ├── navigation/
-    │   ├── AppNavigator.tsx       # Bottom-tabs tipado
-    │   └── types.ts               # RootTabParamList
-    ├── screens/
-    │   ├── HomeScreen.tsx
-    │   ├── CollectionScreen.tsx
-    │   ├── RoutesScreen.tsx
-    │   └── ProfileScreen.tsx
-    ├── state/
-    │   └── useCollectionsStore.ts # Store Zustand
-    ├── styles/
-    │   ├── colors.ts              # Paleta de cores (as const)
-    │   └── globalStyles.ts        # StyleSheet global
-    ├── types/
-    │   └── declarations.d.ts      # Declarações de módulos sem tipos
-    └── validation/
-        ├── collectionValidation.ts
-        └── __tests__/
-            └── collectionValidation.test.ts
+├── backend/                  # API HTTP Node + PostgreSQL
+├── docs/                     # PRD, SPEC, arquitetura e segurança
+├── src/
+│   ├── components/           # componentes visuais
+│   ├── config/               # config pública do app
+│   ├── data/                 # SQLite e repositórios locais
+│   ├── domain/               # tipos e erros
+│   ├── modules/              # casos de uso de rotas
+│   ├── navigation/           # tabs e tipos de navegação
+│   ├── screens/              # telas principais
+│   ├── services/             # integração backend/local
+│   ├── state/                # stores Zustand
+│   └── utils/                # helpers
+├── .env.example              # placeholders seguros
+├── docker-compose.yml
+└── package.json
 ```
-
----
 
 ## Pré-requisitos
 
-- [Node.js](https://nodejs.org/) 20+
-- [npm](https://www.npmjs.com/) 10+
-- `npx expo` (não use o `expo-cli` global legado)
-- Para testar no celular: app **Expo Go** ([Android](https://play.google.com/store/apps/details?id=host.exp.exponent) / [iOS](https://apps.apple.com/app/expo-go/id982107779))
+- Node.js 20+
+- npm 10+
+- Docker Desktop, se quiser testar com containers
+- Expo Go no celular
 
----
+Importante:
 
-## Instalação
+- use `npx expo ...`
+- não use o `expo-cli` global legado
 
-```bash
-# Clone o repositório
-git clone https://github.com/<seu-usuario>/RecolheTudo.git
-cd RecolheTudo
+## Configuração de ambiente
 
-# Configure as variáveis locais
-cp .env.example .env
+O repositório não deve versionar `.env`.
 
-# Instale as dependências
+1. Crie seu arquivo local a partir de `.env.example`
+2. Preencha apenas valores locais de desenvolvimento
+
+Exemplo de variáveis usadas no projeto:
+
+```env
+EXPO_PUBLIC_API_BASE_URL=http://localhost:3001
+POSTGRES_DB=recolhetudo
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=CHANGE_ME
+POSTGRES_PORT=5432
+```
+
+## Rodando o app localmente
+
+### App Expo
+
+PowerShell:
+
+```powershell
 npm install
-
-# Inicie o servidor de desenvolvimento
 npx expo start
 ```
 
-Após iniciar, escaneie o QR code com o Expo Go ou pressione:
-- `a` — abrir no emulador Android
-- `w` — abrir no navegador (versão web)
+Para abrir no navegador:
 
----
+```powershell
+npm run web
+```
 
-## Scripts Disponíveis
+### Backend local
 
-| Script | Comando | Descrição |
+PowerShell:
+
+```powershell
+npm run backend:dev
+```
+
+### PostgreSQL com Docker
+
+PowerShell:
+
+```powershell
+docker-compose up postgres
+```
+
+## Rodando tudo com Docker
+
+PowerShell:
+
+```powershell
+docker-compose up postgres backend dev
+```
+
+URLs esperadas:
+
+- frontend web: [http://localhost:8081](http://localhost:8081)
+- backend health: [http://localhost:3001/health](http://localhost:3001/health)
+- PostgreSQL: `localhost:5432`
+
+## Como abrir no celular com Expo Go
+
+### Opção recomendada: mesma rede Wi‑Fi
+
+1. Instale o Expo Go no celular
+2. Conecte computador e celular na mesma rede
+3. Rode:
+
+```powershell
+npx expo start
+```
+
+4. Abra o Expo Go
+5. Escaneie o QR Code mostrado no terminal ou no navegador do Expo
+
+### Se a rede local bloquear descoberta
+
+Use tunnel:
+
+```powershell
+npx expo start --tunnel
+```
+
+Observações:
+
+- o app no celular só consegue chamar `http://localhost:3001` se essa URL fizer sentido para o dispositivo
+- para teste real no celular, normalmente você precisará usar o IP da máquina no `EXPO_PUBLIC_API_BASE_URL`
+- para web local no navegador do computador, `http://localhost:3001` funciona normalmente
+
+## Scripts disponíveis
+
+| Script | Comando | Uso |
 |---|---|---|
-| `start` | `expo start` | Inicia o Metro Bundler |
-| `android` | `expo start --android` | Abre no Android |
-| `ios` | `expo start --ios` | Abre no iOS |
-| `web` | `expo start --web` | Abre no navegador |
-| `backend:dev` | `npm --prefix backend run dev` | Sobe a API local |
-| `typecheck` | `tsc --noEmit` | Verifica erros de tipo sem compilar |
-| `test` | `jest` | Executa os testes unitários |
+| `start` | `expo start` | inicia o Metro |
+| `web` | `expo start --web` | abre a versão web |
+| `android` | `expo start --android` | abre no Android |
+| `ios` | `expo start --ios` | abre no iOS |
+| `typecheck` | `tsc --noEmit` | checagem de tipos |
+| `test` | `jest` | testes |
+| `test:run` | `jest --runInBand --no-coverage` | testes sem watch |
+| `backend:start` | `npm --prefix backend run start` | sobe backend |
+| `backend:dev` | `npm --prefix backend run dev` | backend em watch |
+| `backend:check` | `npm --prefix backend run check` | sintaxe do backend |
+| `docker:dev` | `docker-compose up dev` | frontend em container |
+| `docker:test` | `docker-compose run --rm test` | typecheck + testes |
+| `docker:clean` | `docker-compose down -v` | limpa containers/volumes |
 
----
-
-## Configuração de Ambiente
-
-O repositório versiona apenas `.env.example`.
-
-Arquivos e credenciais locais ficam em:
-
-- `.env` para desenvolvimento local
-- variáveis de ambiente do shell ou do Docker
-
-Antes de publicar no GitHub:
+## Segurança do repositório
 
 - não comite `.env`
-- não comite bancos `.db` ou `.sqlite`
-- não comite logs, caches ou dumps
-- mantenha senhas e URLs sensíveis fora do código
+- não comite `.db`, `.sqlite`, logs, dumps ou caches
+- mantenha senhas e credenciais apenas em variáveis locais
+- publique apenas `.env.example` com placeholders
 
----
+Checklist adicional em:
 
-## Banco de Dados
+- [docs/SECURITY.md](C:/Users/User/Documents/RecolheTudo/docs/SECURITY.md)
 
-O app utiliza **SQLite local** via `expo-sqlite` com um sistema de **migrações versionadas**.
+## Documentação complementar
 
-### Tabelas
+- [docs/PRD.md](C:/Users/User/Documents/RecolheTudo/docs/PRD.md)
+- [docs/SPEC.md](C:/Users/User/Documents/RecolheTudo/docs/SPEC.md)
+- [docs/BACKEND.md](C:/Users/User/Documents/RecolheTudo/docs/BACKEND.md)
+- [docs/ARQUITETURA-ALVO.md](C:/Users/User/Documents/RecolheTudo/docs/ARQUITETURA-ALVO.md)
 
-**`collections`**
+## Qualidade e validação
 
-| Coluna | Tipo | Descrição |
-|---|---|---|
-| `id` | INTEGER PK | Identificador único |
-| `material` | TEXT | `papel`, `plastico`, `metal`, `vidro`, `outros` |
-| `weight_kg` | REAL | Peso estimado em kg |
-| `latitude` | REAL (nullable) | Latitude GPS no momento da coleta |
-| `longitude` | REAL (nullable) | Longitude GPS no momento da coleta |
-| `created_at` | TEXT | Data/hora ISO 8601 |
-| `notes` | TEXT (nullable) | Observações livres |
+Comandos usados para validar o projeto:
 
-**`schema_version`**
-
-| Coluna | Tipo | Descrição |
-|---|---|---|
-| `version` | INTEGER | Versão atual do schema |
-
-### Migrações
-
-Cada migração é executada dentro de uma transação (`BEGIN TRANSACTION / ROLLBACK`). Adicionar novas migrações:
-
-```typescript
-// src/data/database.ts
-const MIGRATIONS: Migration[] = [
-  {
-    version: 1,
-    sql: `CREATE TABLE IF NOT EXISTS collections ( ... )`,
-  },
-  // Adicione aqui novas migrações incrementais
-  {
-    version: 2,
-    sql: `ALTER TABLE collections ADD COLUMN synced INTEGER DEFAULT 0`,
-  },
-];
+```powershell
+npm run typecheck
+npm run test:run
+npm run backend:check
 ```
 
----
+## Limitações conhecidas
 
-## Testes
+O projeto está funcional para desenvolvimento, mas ainda há pontos em revisão antes de ser tratado como backend de produção:
 
-```bash
-# Executar todos os testes
-npm test
-
-# Executar em modo watch
-npx jest --watch
-
-# Executar com cobertura
-npx jest --coverage
-```
-
-### Suítes existentes
-
-| Arquivo | Casos | O que testa |
-|---|---|---|
-| `collectionValidation.test.ts` | 5 | Material inválido, peso zero, data inválida, coordenada fora da faixa, caso válido |
-| `collectionsRepository.test.ts` | 3 | Insert, getByDate, getDailySummary (banco mockado) |
-
-Os testes do repository utilizam `jest.mock("../../database")` para isolar completamente o SQLite.
-
----
-
-## CI/CD
-
-O pipeline é executado via **GitHub Actions** em todo `push` para `main` e em Pull Requests.
-
-```
-push / PR → Checkout → Node 20 → npm ci → typecheck → testes
-```
-
-Arquivo: [.github/workflows/ci.yml](.github/workflows/ci.yml)
-
-A pipeline bloqueia merge se:
-- `tsc --noEmit` retornar qualquer erro de tipo
-- Qualquer teste falhar
-
----
-
-## Configuração TypeScript
-
-O projeto usa **TypeScript strict mode** completo com as seguintes flags ativas:
-
-```jsonc
-{
-  "strict": true,               // habilita todas as verificações strict
-  "noImplicitAny": true,        // proíbe any implícito
-  "exactOptionalPropertyTypes": true, // distingue prop ausente de prop undefined
-  "noUncheckedIndexedAccess": true,   // acesso a array/record retorna T | undefined
-  "allowJs": false,             // arquivos .js proibidos no projeto
-  "skipLibCheck": true          // necessário no ecossistema Expo/RN
-}
-```
-
-> **Por que `skipLibCheck: true`?** Dependências do ecossistema React Native/Expo possuem conflitos de versão em seus arquivos `.d.ts` que são inevitáveis e fora do controle do projeto. `skipLibCheck` ignora esses conflitos sem abrir mão do strict mode no código da aplicação.
+- inconsistências na lógica de sync/list/analytics do backend
+- ausência de autenticação
+- ausência de observabilidade estruturada
+- reconcilição de conflitos ainda incompleta
