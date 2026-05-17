@@ -2,11 +2,16 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
+    branches: [main, develop]
+
+env:
+  NODE_VERSION: 20
 
 jobs:
   quality:
+    name: TypeCheck & Tests
     runs-on: ubuntu-latest
 
     steps:
@@ -16,14 +21,55 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Typecheck
+      - name: TypeScript Check
         run: npm run typecheck
 
-      - name: Unit tests
-        run: npm test --runInBand
+      - name: Unit Tests
+        run: npm test -- --coverage --passWithNoTests
+
+      - name: Upload Coverage
+        uses: codecov/codecov-action@v3
+        if: always()
+        with:
+          files: ./coverage/lcov.info
+          flags: unittests
+          name: codecov-umbrella
+
+  lint:
+    name: Code Quality Checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check for console.log statements
+        run: |
+          if grep -r "console\." src --include="*.ts" --include="*.tsx" | grep -v "console.error" | grep -v "// "; then
+            echo "❌ Found console statements in code (except console.error and commented lines)"
+            exit 1
+          fi
+          echo "✅ No console statements found"
+
+      - name: Check for TODO/FIXME
+        run: |
+          if grep -r "TODO\|FIXME" src --include="*.ts" --include="*.tsx"; then
+            echo "⚠️ Found TODO/FIXME comments"
+          else
+            echo "✅ No TODO/FIXME comments"
+          fi
