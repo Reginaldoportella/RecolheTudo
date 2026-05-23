@@ -9,12 +9,16 @@ interface EmptyStateProps {
   title: string;
   description: string;
   iconName?: React.ComponentProps<typeof Ionicons>["name"];
+  actionLabel?: string;
+  onAction?: () => void;
 }
 
 const EmptyState = ({
   title,
   description,
   iconName = "archive-outline",
+  actionLabel,
+  onAction,
 }: EmptyStateProps): React.JSX.Element => {
   return (
     <AppCard style={styles.card}>
@@ -23,6 +27,11 @@ const EmptyState = ({
       </View>
       <Text style={styles.title}>{title}</Text>
       <Text style={styles.description}>{description}</Text>
+      {actionLabel && onAction ? (
+        <Text style={styles.action} onPress={onAction}>
+          {actionLabel}
+        </Text>
+      ) : null}
     </AppCard>
   );
 };
@@ -52,6 +61,12 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     marginTop: 8,
     textAlign: "center",
+  },
+  action: {
+    color: colors.primaryStrong,
+    fontSize: 14,
+    fontWeight: "800",
+    marginTop: 14,
   },
 });
 

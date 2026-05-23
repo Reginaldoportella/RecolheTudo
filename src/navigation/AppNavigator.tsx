@@ -36,10 +36,36 @@ function getTabIconName(
   }
 }
 
+function getInitialRouteName(): keyof RootTabParamList {
+  if (Platform.OS !== "web") {
+    return "Inicio";
+  }
+
+  const locationLike = (
+    globalThis as typeof globalThis & { location?: { search?: string } }
+  ).location;
+  const params = new URLSearchParams(locationLike?.search ?? "");
+  const screen = params.get("screen");
+
+  switch (screen) {
+    case "Coleta":
+      return "Coleta";
+    case "Historico":
+      return "Historico";
+    case "Rotas":
+      return "Rotas";
+    case "Perfil":
+      return "Perfil";
+    default:
+      return "Inicio";
+  }
+}
+
 const AppNavigator = (): React.JSX.Element => {
   return (
     <NavigationContainer>
       <Tab.Navigator
+        initialRouteName={getInitialRouteName()}
         screenOptions={({ route }) => ({
           tabBarIcon: ({ focused, color, size }) => (
             <Ionicons

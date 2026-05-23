@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Image,
   Modal,
   ScrollView,
   StyleSheet,
@@ -9,11 +10,13 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  useWindowDimensions,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
-import AppButton from "../components/ui/AppButton";
 import AppCard from "../components/ui/AppCard";
+import OfflineStatusCard from "../components/ui/OfflineStatusCard";
+import PrimaryButton from "../components/ui/PrimaryButton";
 import StatCard from "../components/ui/StatCard";
 import {
   backendService,
@@ -21,7 +24,11 @@ import {
 } from "../services/backendService";
 import { databaseInspectionService } from "../services/databaseInspectionService";
 import { profileService } from "../services/profileService";
-import type { DailySummary } from "../domain/types/collection";
+import type {
+  DailySummary,
+  MaterialsSummary,
+  ProductivitySummary,
+} from "../domain/types/collection";
 import colors from "../styles/colors";
 import globalStyles from "../styles/globalStyles";
 
@@ -41,8 +48,6 @@ function ProgressBar({
           styles.progressValue,
           {
             width: `${pct * 100}%`,
-            backgroundColor:
-              pct >= 1 ? colors.primary : pct >= 0.6 ? colors.accent : colors.secondary,
           },
         ]}
       />
@@ -50,14 +55,38 @@ function ProgressBar({
   );
 }
 
+function formatSyncTime(value: string | null): string {
+  if (!value) {
+    return "Ainda nao sincronizado";
+  }
+
+  return new Date(value).toLocaleString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function formatShortDate(value: string): string {
+  return new Date(`${value}T00:00:00.000Z`).toLocaleDateString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+  });
+}
+
 const ProfileScreen = (): React.JSX.Element => {
+  const { width } = useWindowDimensions();
+  const isWide = width >= 980;
   const [goalKg, setGoalKg] = useState<number>(20);
   const [weeklySummaries, setWeeklySummaries] = useState<DailySummary[]>([]);
+  const [productivitySummary, setProductivitySummary] = useState<ProductivitySummary | null>(
+    null,
+  );
+  const [materialsSummary, setMaterialsSummary] = useState<MaterialsSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [editModal, setEditModal] = useState(false);
-  const [inspectionModal, setInspectionModal] = useState(false);
-  const [inspectionLoading, setInspectionLoading] = useState(false);
-  const [inspectionError, setInspectionError] = useState<string | null>(null);
+  const [offlineModal, setOfflineModal] = useState(false);
   const [inspectionSnapshot, setInspectionSnapshot] = useState<
     Awaited<ReturnType<typeof databaseInspectionService.inspect>> | null
   >(null);
@@ -66,6 +95,15 @@ const ProfileScreen = (): React.JSX.Element => {
   );
   const [inputGoal, setInputGoal] = useState("");
 
+  const refreshOfflineStatus = useCallback(async () => {
+    const [snapshot, health] = await Promise.all([
+      databaseInspectionService.inspect(),
+      backendService.getHealth().catch(() => null),
+    ]);
+    setInspectionSnapshot(snapshot);
+    setBackendSnapshot(health);
+  }, []);
+
   const load = useCallback(async () => {
     setLoading(true);
 
@@ -73,12 +111,15 @@ const ProfileScreen = (): React.JSX.Element => {
       const dashboard = await profileService.loadDashboard();
       setGoalKg(dashboard.goalKg);
       setWeeklySummaries(dashboard.weeklySummaries);
+      setProductivitySummary(dashboard.productivitySummary);
+      setMaterialsSummary(dashboard.materialsSummary);
+      await refreshOfflineStatus();
     } catch {
       Alert.alert("Erro", "Nao foi possivel carregar os dados do perfil.");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [refreshOfflineStatus]);
 
   useEffect(() => {
     void load();
@@ -97,42 +138,38 @@ const ProfileScreen = (): React.JSX.Element => {
     setEditModal(false);
   }, [inputGoal]);
 
-  const handleOpenInspection = useCallback(async () => {
-    setInspectionModal(true);
-    setInspectionLoading(true);
-    setInspectionError(null);
-
-    try {
-      const [snapshot, health] = await Promise.all([
-        databaseInspectionService.inspect(),
-        backendService.getHealth(),
-      ]);
-      setInspectionSnapshot(snapshot);
-      setBackendSnapshot(health);
-    } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Nao foi possivel inspecionar o banco agora.";
-      setInspectionError(message);
-      setBackendSnapshot(null);
-    } finally {
-      setInspectionLoading(false);
-    }
-  }, []);
-
   const today = weeklySummaries[weeklySummaries.length - 1];
   const todayKg = today?.totalKg ?? 0;
   const weekTotalKg = useMemo(
     () => weeklySummaries.reduce((acc, item) => acc + item.totalKg, 0),
     [weeklySummaries],
   );
-  const weekGoalKg = goalKg * profileService.daysWindow;
-  const activeDays = weeklySummaries.filter(
-    (item) => item.collectionsCount > 0,
-  ).length;
-  const averageActiveDay = activeDays > 0 ? weekTotalKg / activeDays : 0;
-  const bestDayKg = Math.max(...weeklySummaries.map((item) => item.totalKg), 0);
+  const activeDays = weeklySummaries.filter((item) => item.collectionsCount > 0).length;
+  const productivityPoints = productivitySummary?.points ?? [];
+  const bestDay = useMemo(() => {
+    if (productivityPoints.length === 0) {
+      return null;
+    }
+
+    return [...productivityPoints].sort((a, b) => b.totalKg - a.totalKg)[0];
+  }, [productivityPoints]);
+  const averagePerActiveDay = useMemo(() => {
+    if (activeDays === 0) {
+      return 0;
+    }
+
+    return weekTotalKg / activeDays;
+  }, [activeDays, weekTotalKg]);
+  const topMaterial = useMemo(() => {
+    if (!materialsSummary || materialsSummary.items.length === 0) {
+      return null;
+    }
+
+    return [...materialsSummary.items].sort((a, b) => b.totalKg - a.totalKg)[0];
+  }, [materialsSummary]);
+  const latestSyncLabel =
+    inspectionSnapshot?.recentCollections.find((item) => item.lastSyncedAt)?.lastSyncedAt ??
+    null;
 
   if (loading) {
     return (
@@ -146,129 +183,181 @@ const ProfileScreen = (): React.JSX.Element => {
   return (
     <ScrollView
       style={globalStyles.container}
-      contentContainerStyle={globalStyles.screenContent}
+      contentContainerStyle={styles.content}
       showsVerticalScrollIndicator={false}
     >
       <View style={styles.hero}>
+        <Image
+          source={require("../../assets/brand/brand-mark.png")}
+          style={styles.heroMark}
+          resizeMode="contain"
+        />
         <View style={styles.avatarWrap}>
-          <Ionicons name="person-outline" size={34} color={colors.textLight} />
+          <Image
+            source={require("../../assets/brand/worker-avatar.png")}
+            style={styles.avatarImage}
+            resizeMode="contain"
+          />
         </View>
-        <Text style={styles.heroTitle}>Perfil de trabalho</Text>
-        <Text style={styles.heroSubtitle}>
-          Metas, consistencia semanal e ritmo medio para acompanhar seu progresso.
-        </Text>
+        <View style={styles.heroText}>
+          <Text style={styles.heroTitle}>Perfil de trabalho</Text>
+          <Text style={styles.heroSubtitle}>
+            Veja, controle e acompanhe seu ritmo de trabalho, mesmo sem internet.
+          </Text>
+        </View>
       </View>
 
       <AppCard style={styles.goalCard}>
-        <View style={styles.cardHeader}>
+        <View style={styles.goalHeader}>
           <View>
-            <Text style={globalStyles.sectionEyebrow}>Meta diaria</Text>
-            <Text style={styles.cardTitle}>{goalKg.toFixed(1)} kg por dia</Text>
+            <Text style={styles.goalEyebrow}>Meta diaria</Text>
+            <Text style={styles.goalValue}>{goalKg.toFixed(1)} kg por dia</Text>
           </View>
           <TouchableOpacity
-            style={styles.editButton}
+            style={styles.goalAction}
             onPress={() => {
               setInputGoal(String(goalKg));
               setEditModal(true);
             }}
           >
-            <Ionicons name="create-outline" size={18} color={colors.primaryStrong} />
+            <Ionicons name="locate-outline" size={22} color={colors.primaryStrong} />
           </TouchableOpacity>
         </View>
 
-        <Text style={styles.supportText}>
-          Hoje voce registrou {todayKg.toFixed(1)} kg.
-        </Text>
-        <ProgressBar value={todayKg} max={goalKg} />
-
-        <View style={styles.goalStatusRow}>
-          <Ionicons
-            name={todayKg >= goalKg ? "checkmark-circle" : "time-outline"}
-            size={16}
-            color={todayKg >= goalKg ? colors.primary : colors.textMuted}
-          />
-          <Text style={styles.goalStatusText}>
-            {todayKg >= goalKg
-              ? "Meta atingida no dia de hoje."
-              : `${(goalKg - todayKg).toFixed(1)} kg para atingir a meta de hoje.`}
+        <View style={styles.goalInlineCard}>
+          <Ionicons name="ellipse-outline" size={22} color={colors.primaryStrong} />
+          <Text style={styles.goalInlineText}>
+            {Math.max(goalKg - todayKg, 0).toFixed(1)} kg para atingir a meta de hoje
           </Text>
         </View>
       </AppCard>
 
       <View style={styles.statsRow}>
-        <StatCard value={weekTotalKg.toFixed(1)} label="kg na semana" />
-        <StatCard value={String(activeDays)} label="dias ativos" />
-        <StatCard value={averageActiveDay.toFixed(1)} label="kg por dia ativo" />
+        <StatCard value={weekTotalKg.toFixed(1)} label="kg na semana" iconName="scale-outline" />
+        <StatCard value={String(activeDays)} label="dia ativo" iconName="calendar-outline" />
+        <StatCard value={todayKg.toFixed(1)} label="kg no dia" iconName="albums-outline" />
+      </View>
+
+      <View style={styles.statsRow}>
+        <StatCard
+          value={bestDay ? `${bestDay.totalKg.toFixed(1)} kg` : "0.0 kg"}
+          label="melhor dia"
+          helperText={bestDay ? formatShortDate(bestDay.date) : "Sem registros na semana"}
+          iconName="trophy-outline"
+        />
+        <StatCard
+          value={`${averagePerActiveDay.toFixed(1)} kg`}
+          label="media por dia ativo"
+          helperText={`${activeDays} dias com coleta nesta semana`}
+          iconName="trending-up-outline"
+        />
+        <StatCard
+          value={
+            topMaterial
+              ? topMaterial.material.charAt(0).toUpperCase() + topMaterial.material.slice(1)
+              : "Sem destaque"
+          }
+          label="material em destaque"
+          helperText={
+            topMaterial
+              ? `${topMaterial.totalKg.toFixed(1)} kg do total semanal`
+              : "Comece registrando para ver a composicao"
+          }
+          iconName="layers-outline"
+        />
       </View>
 
       <AppCard style={styles.weekCard}>
-        <Text style={globalStyles.sectionEyebrow}>
-          Ultimos {profileService.daysWindow} dias
+        <Text style={styles.weekEyebrow}>Ritmo semanal</Text>
+        <Text style={styles.weekDescription}>
+          Veja sua evolucao diaria nos ultimos 7 dias (kg)
         </Text>
-        <Text style={styles.cardTitle}>Ritmo semanal</Text>
-        <Text style={styles.supportText}>
-          Meta acumulada: {weekGoalKg.toFixed(1)} kg. Melhor dia: {bestDayKg.toFixed(1)} kg.
-        </Text>
-        <ProgressBar value={weekTotalKg} max={weekGoalKg} />
 
         <View style={styles.chartRow}>
-          {weeklySummaries.map((summary) => {
-            const barHeight =
-              bestDayKg > 0 ? Math.max((summary.totalKg / bestDayKg) * 90, 6) : 6;
-            const metGoal = summary.totalKg >= goalKg;
+          {productivityPoints.map((point) => {
+            const max = Math.max(...productivityPoints.map((item) => item.totalKg), 1);
+            const barHeight = Math.max((point.totalKg / max) * 120, 10);
+            const date = new Date(`${point.date}T00:00:00.000Z`);
+            const weekday = date.toLocaleDateString("pt-BR", { weekday: "short" });
 
             return (
-              <View key={summary.date} style={styles.chartColumn}>
-                <Text style={styles.chartValueLabel}>
-                  {summary.totalKg > 0 ? summary.totalKg.toFixed(0) : ""}
-                </Text>
+              <View key={point.date} style={styles.chartColumn}>
                 <View style={styles.chartTrack}>
-                  <View
-                    style={[
-                      styles.chartBar,
-                      {
-                        height: barHeight,
-                        backgroundColor: metGoal ? colors.primary : colors.secondary,
-                      },
-                    ]}
-                  />
+                  <View style={[styles.chartBar, { height: barHeight }]} />
                 </View>
-                <Text style={styles.chartDateLabel}>{summary.date.slice(5)}</Text>
+                <Text style={styles.chartDay}>{weekday}</Text>
+                <Text style={styles.chartValue}>{point.totalKg.toFixed(1)}</Text>
               </View>
             );
           })}
         </View>
       </AppCard>
 
-      <AppCard style={styles.insightCard}>
-        <Text style={globalStyles.sectionEyebrow}>Leitura rapida</Text>
-        <Text style={styles.cardTitle}>O que observar</Text>
-        <Text style={styles.supportText}>
-          Se os dias ativos estiverem baixos, vale priorizar consistencia. Se o volume medio estiver baixo, a rota e o tipo de ponto coletado podem ser o proximo ajuste.
+      <AppCard style={styles.weekCard}>
+        <Text style={styles.weekEyebrow}>Composicao da semana</Text>
+        <Text style={styles.weekDescription}>
+          Veja quais materiais estao puxando sua produtividade nesta semana.
         </Text>
+
+        <View style={styles.materialsList}>
+          {(materialsSummary?.items ?? []).slice(0, 3).map((item) => (
+            <View key={item.material} style={styles.materialRow}>
+              <Text style={styles.materialName}>
+                {item.material.charAt(0).toUpperCase() + item.material.slice(1)}
+              </Text>
+              <Text style={styles.materialAmount}>{item.totalKg.toFixed(1)} kg</Text>
+            </View>
+          ))}
+          {(!materialsSummary || materialsSummary.items.length === 0) && (
+            <Text style={styles.materialEmpty}>
+              Ainda nao ha materiais suficientes para compor este resumo.
+            </Text>
+          )}
+        </View>
       </AppCard>
 
-      <AppCard style={styles.debugCard}>
-        <Text style={globalStyles.sectionEyebrow}>Diagnostico</Text>
-        <Text style={styles.cardTitle}>Inspecao local do banco</Text>
-        <Text style={styles.supportText}>
-          Use este painel para validar quantidades, schema aplicado e ultimos registros salvos.
-        </Text>
-        <AppButton
-          label="Abrir inspecao de dados"
-          variant="secondary"
-          onPress={() => {
-            void handleOpenInspection();
-          }}
-          style={styles.debugButton}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Status offline</Text>
+
+        <OfflineStatusCard
+          title="Dados salvos no aparelho"
+          description="Suas informacoes ficam salvas no aparelho e prontas para sincronizar."
+          lastSyncLabel={formatSyncTime(latestSyncLabel)}
         />
+        <OfflineStatusCard
+          title="Modo offline ativo"
+          description="Voce pode registrar normalmente mesmo sem internet."
+        />
+        <OfflineStatusCard
+          title="Sincronizacao pendente quando houver internet"
+          description="Assim que a conexao voltar, o app tenta enviar tudo automaticamente."
+          pendingCount={inspectionSnapshot?.pendingSyncCount ?? 0}
+        />
+      </View>
+
+      <AppCard muted style={styles.observeCard}>
+        <View style={styles.observeIcon}>
+          <Ionicons name="bulb-outline" size={22} color={colors.primaryStrong} />
+        </View>
+        <View style={styles.observeBody}>
+          <Text style={styles.observeTitle}>O que observar</Text>
+          <Text style={styles.observeText}>
+            Pequenos registros geram grandes impactos. Cada coleta conta para um futuro mais sustentavel.
+          </Text>
+        </View>
       </AppCard>
+
+      <PrimaryButton
+        label="Ver detalhes do status offline"
+        variant="secondary"
+        onPress={() => setOfflineModal(true)}
+      />
 
       <Modal visible={editModal} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={styles.modalSheet}>
             <Text style={styles.modalTitle}>Alterar meta diaria</Text>
-            <Text style={styles.supportText}>
+            <Text style={styles.modalText}>
               Defina um valor realista para acompanhar sua rotina.
             </Text>
 
@@ -282,140 +371,47 @@ const ProfileScreen = (): React.JSX.Element => {
             />
 
             <View style={styles.modalActions}>
-              <AppButton
+              <PrimaryButton
                 label="Cancelar"
                 variant="secondary"
                 onPress={() => setEditModal(false)}
-                style={styles.modalCancelButton}
+                style={styles.modalButton}
               />
-              <AppButton
+              <PrimaryButton
                 label="Salvar"
                 onPress={() => {
                   void handleSaveGoal();
                 }}
-                style={styles.modalSaveButton}
+                style={styles.modalButton}
               />
             </View>
           </View>
         </View>
       </Modal>
 
-      <Modal visible={inspectionModal} transparent animationType="slide">
+      <Modal visible={offlineModal} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={styles.modalSheet}>
-            <Text style={styles.modalTitle}>Inspecao do banco local</Text>
-            <Text style={styles.supportText}>
-              Este painel reflete o estado do armazenamento local do app nesta execucao.
+            <Text style={styles.modalTitle}>Status offline</Text>
+            <Text style={styles.modalText}>
+              Coletas salvas no aparelho: {inspectionSnapshot?.collectionsCount ?? 0}
+            </Text>
+            <Text style={styles.modalText}>
+              Pendentes de sincronizacao: {inspectionSnapshot?.pendingSyncCount ?? 0}
+            </Text>
+            <Text style={styles.modalText}>
+              Ultima sincronizacao: {formatSyncTime(latestSyncLabel)}
+            </Text>
+            <Text style={styles.modalText}>
+              Servidor: {backendSnapshot ? "disponivel" : "indisponivel"}
             </Text>
 
-            {inspectionLoading && (
-              <View style={styles.inspectionLoadingRow}>
-                <ActivityIndicator size="small" color={colors.primary} />
-                <Text style={styles.inspectionLoadingText}>Lendo dados...</Text>
-              </View>
-            )}
-
-            {inspectionError && (
-              <Text style={styles.inspectionErrorText}>{inspectionError}</Text>
-            )}
-
-            {inspectionSnapshot && !inspectionLoading && (
-              <ScrollView style={styles.inspectionScroll} showsVerticalScrollIndicator={false}>
-                <View style={styles.statsRow}>
-                  <StatCard
-                    value={String(inspectionSnapshot.collectionsCount)}
-                    label="collections"
-                  />
-                  <StatCard
-                    value={String(inspectionSnapshot.collectionPointsCount)}
-                    label="collection_points"
-                  />
-                  <StatCard
-                    value={String(inspectionSnapshot.routePointsCount)}
-                    label="route_points"
-                  />
-                  <StatCard
-                    value={String(inspectionSnapshot.pendingSyncCount)}
-                    label="sync_queue"
-                  />
-                </View>
-
-                <AppCard style={styles.inspectionBlock}>
-                  <Text style={globalStyles.sectionEyebrow}>Backend</Text>
-                  <View style={styles.inspectionRow}>
-                    <Text style={styles.inspectionRowTitle}>
-                      {backendSnapshot
-                        ? `${backendSnapshot.service} online`
-                        : "Backend nao configurado ou indisponivel"}
-                    </Text>
-                    <Text style={styles.inspectionRowText}>
-                      {backendSnapshot
-                        ? `Colecoes: ${backendSnapshot.state?.collectionsCount ?? 0} | Pontos: ${backendSnapshot.state?.collectionPointsCount ?? 0} | Rotas: ${backendSnapshot.state?.routeRunsCount ?? 0}`
-                        : "Defina EXPO_PUBLIC_API_BASE_URL para usar sync, rotas e analytics centralizados."}
-                    </Text>
-                  </View>
-                  {backendSnapshot ? (
-                    <Text style={styles.inspectionRowText}>
-                      Ultima leitura: {backendSnapshot.time}
-                    </Text>
-                  ) : null}
-                </AppCard>
-
-                <AppCard style={styles.inspectionBlock}>
-                  <Text style={globalStyles.sectionEyebrow}>Schema</Text>
-                  {inspectionSnapshot.schemaVersions.map((version) => (
-                    <View key={version.version} style={styles.inspectionRow}>
-                      <Text style={styles.inspectionRowTitle}>
-                        v{version.version} - {version.name}
-                      </Text>
-                      <Text style={styles.inspectionRowText}>
-                        {version.applied_at}
-                      </Text>
-                    </View>
-                  ))}
-                </AppCard>
-
-                <AppCard style={styles.inspectionBlock}>
-                  <Text style={globalStyles.sectionEyebrow}>Ultimas coletas</Text>
-                  {inspectionSnapshot.recentCollections.length === 0 ? (
-                    <Text style={styles.inspectionEmptyText}>
-                      Nenhuma coleta salva no banco local.
-                    </Text>
-                  ) : (
-                    inspectionSnapshot.recentCollections.map((collection) => (
-                      <View key={collection.id} style={styles.inspectionRow}>
-                        <Text style={styles.inspectionRowTitle}>
-                          #{collection.id} - {collection.material} - {collection.weightKg.toFixed(1)} kg
-                        </Text>
-                        <Text style={styles.inspectionRowText}>
-                          {collection.collectedAt}
-                        </Text>
-                        <Text style={styles.inspectionRowText}>
-                          sync: {collection.syncStatus}
-                          {collection.remoteId ? ` | remote: ${collection.remoteId}` : ""}
-                        </Text>
-                      </View>
-                    ))
-                  )}
-                </AppCard>
-              </ScrollView>
-            )}
-
-            <View style={styles.modalActions}>
-              <AppButton
-                label="Fechar"
-                variant="secondary"
-                onPress={() => setInspectionModal(false)}
-                style={styles.modalCancelButton}
-              />
-              <AppButton
-                label="Atualizar leitura"
-                onPress={() => {
-                  void handleOpenInspection();
-                }}
-                style={styles.modalSaveButton}
-              />
-            </View>
+            <PrimaryButton
+              label="Fechar"
+              variant="secondary"
+              onPress={() => setOfflineModal(false)}
+              style={styles.modalSingleButton}
+            />
           </View>
         </View>
       </Modal>
@@ -436,151 +432,231 @@ const styles = StyleSheet.create({
     fontSize: 15,
     marginTop: 12,
   },
+  content: {
+    width: "100%",
+    maxWidth: 1180,
+    alignSelf: "center",
+    paddingHorizontal: 20,
+    paddingTop: 24,
+    paddingBottom: 36,
+    gap: 18,
+  },
   hero: {
     backgroundColor: colors.primaryStrong,
-    borderRadius: 26,
-    padding: 22,
-    marginBottom: 18,
+    borderRadius: 30,
+    padding: 24,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 18,
+    overflow: "hidden",
+  },
+  heroMark: {
+    position: "absolute",
+    right: -10,
+    top: 0,
+    width: 220,
+    height: 220,
+    opacity: 0.34,
   },
   avatarWrap: {
-    width: 58,
-    height: 58,
-    borderRadius: 20,
+    width: 120,
+    height: 120,
+    borderRadius: 60,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.14)",
+  },
+  avatarImage: {
+    width: 112,
+    height: 112,
+  },
+  heroText: {
+    flex: 1,
   },
   heroTitle: {
     color: colors.textLight,
-    fontSize: 28,
+    fontSize: 34,
+    lineHeight: 40,
     fontWeight: "800",
-    marginTop: 18,
   },
   heroSubtitle: {
-    color: "rgba(255,255,255,0.76)",
-    fontSize: 15,
-    lineHeight: 22,
-    marginTop: 8,
+    color: "rgba(255,255,255,0.9)",
+    fontSize: 16,
+    lineHeight: 26,
+    marginTop: 14,
   },
   goalCard: {
-    backgroundColor: colors.surface,
-    borderRadius: 22,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: colors.border,
-    marginBottom: 14,
+    gap: 18,
   },
-  cardHeader: {
+  goalHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
   },
-  cardTitle: {
-    color: colors.text,
-    fontSize: 22,
+  goalEyebrow: {
+    color: colors.primaryStrong,
+    fontSize: 14,
     fontWeight: "800",
-    marginTop: 4,
+    textTransform: "uppercase",
+    letterSpacing: 1,
   },
-  editButton: {
-    width: 42,
-    height: 42,
-    borderRadius: 14,
+  goalValue: {
+    color: colors.text,
+    fontSize: 30,
+    lineHeight: 36,
+    fontWeight: "800",
+    marginTop: 8,
+  },
+  goalAction: {
+    width: 64,
+    height: 64,
+    borderRadius: 20,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: colors.primarySoft,
   },
-  supportText: {
-    color: colors.textMuted,
-    fontSize: 14,
-    lineHeight: 21,
-    marginTop: 8,
-  },
-  progressTrack: {
-    height: 12,
-    backgroundColor: colors.surfaceMuted,
-    borderRadius: 999,
-    overflow: "hidden",
-    marginTop: 14,
-  },
-  progressValue: {
-    height: 12,
-    borderRadius: 999,
-  },
-  goalStatusRow: {
+  goalInlineCard: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-    marginTop: 12,
+    gap: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 18,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
   },
-  goalStatusText: {
+  goalInlineText: {
     color: colors.text,
-    fontSize: 13,
-    fontWeight: "700",
-    flex: 1,
+    fontSize: 16,
   },
   statsRow: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 12,
-    marginBottom: 14,
+    gap: 14,
   },
   weekCard: {
-    backgroundColor: colors.surface,
-    borderRadius: 22,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: colors.border,
-    marginBottom: 14,
+    gap: 12,
+  },
+  weekEyebrow: {
+    color: colors.text,
+    fontSize: 16,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: 1,
+  },
+  weekDescription: {
+    color: colors.textMuted,
+    fontSize: 15,
+    lineHeight: 22,
+  },
+  materialsList: {
+    marginTop: 8,
+    gap: 10,
+  },
+  materialRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  materialName: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  materialAmount: {
+    color: colors.primaryStrong,
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  materialEmpty: {
+    color: colors.textMuted,
+    fontSize: 14,
+    lineHeight: 22,
   },
   chartRow: {
     flexDirection: "row",
     alignItems: "flex-end",
     justifyContent: "space-between",
-    marginTop: 18,
-    minHeight: 126,
-    gap: 8,
+    gap: 10,
+    marginTop: 10,
   },
   chartColumn: {
     flex: 1,
     alignItems: "center",
   },
-  chartValueLabel: {
-    color: colors.textMuted,
-    fontSize: 10,
-    height: 14,
-    marginBottom: 4,
-  },
   chartTrack: {
-    width: "100%",
-    maxWidth: 28,
-    height: 92,
-    borderRadius: 999,
+    width: 34,
+    height: 128,
+    borderRadius: 17,
     backgroundColor: colors.surfaceMuted,
     justifyContent: "flex-end",
     overflow: "hidden",
   },
   chartBar: {
     width: "100%",
-    borderRadius: 999,
+    borderRadius: 17,
+    backgroundColor: "#2F80ED",
   },
-  chartDateLabel: {
+  chartDay: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: "700",
+    marginTop: 10,
+  },
+  chartValue: {
     color: colors.textMuted,
-    fontSize: 10,
-    marginTop: 8,
+    fontSize: 12,
+    marginTop: 4,
   },
-  insightCard: {
-    backgroundColor: colors.surface,
-    borderRadius: 22,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: colors.border,
+  section: {
+    gap: 14,
   },
-  debugCard: {
-    marginTop: 14,
+  sectionTitle: {
+    color: colors.text,
+    fontSize: 18,
+    fontWeight: "800",
+    textTransform: "uppercase",
   },
-  debugButton: {
-    alignSelf: "flex-start",
-    marginTop: 16,
+  observeCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+  },
+  observeIcon: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: "#EAF4E5",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  observeBody: {
+    flex: 1,
+  },
+  observeTitle: {
+    color: colors.text,
+    fontSize: 16,
+    fontWeight: "800",
+    textTransform: "uppercase",
+  },
+  observeText: {
+    color: colors.textMuted,
+    fontSize: 14,
+    lineHeight: 22,
+    marginTop: 6,
+  },
+  progressTrack: {
+    height: 12,
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: 999,
+    overflow: "hidden",
+  },
+  progressValue: {
+    height: 12,
+    borderRadius: 999,
+    backgroundColor: colors.primary,
   },
   modalOverlay: {
     flex: 1,
@@ -598,6 +674,12 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: "800",
   },
+  modalText: {
+    color: colors.textMuted,
+    fontSize: 14,
+    lineHeight: 22,
+    marginTop: 10,
+  },
   input: {
     backgroundColor: colors.surfaceMuted,
     borderWidth: 1,
@@ -614,55 +696,11 @@ const styles = StyleSheet.create({
     gap: 12,
     marginTop: 18,
   },
-  modalCancelButton: {
-    flex: 1,
-    backgroundColor: colors.surfaceMuted,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  modalSaveButton: {
+  modalButton: {
     flex: 1,
   },
-  inspectionLoadingRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    marginTop: 16,
-  },
-  inspectionLoadingText: {
-    color: colors.textMuted,
-    fontSize: 14,
-  },
-  inspectionErrorText: {
-    color: colors.error,
-    fontSize: 14,
-    lineHeight: 21,
-    marginTop: 16,
-  },
-  inspectionScroll: {
-    maxHeight: 360,
-    marginTop: 12,
-  },
-  inspectionBlock: {
-    marginTop: 12,
-  },
-  inspectionRow: {
-    paddingTop: 12,
-  },
-  inspectionRowTitle: {
-    color: colors.text,
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  inspectionRowText: {
-    color: colors.textMuted,
-    fontSize: 12,
-    marginTop: 4,
-  },
-  inspectionEmptyText: {
-    color: colors.textMuted,
-    fontSize: 14,
-    marginTop: 12,
+  modalSingleButton: {
+    marginTop: 20,
   },
 });
 

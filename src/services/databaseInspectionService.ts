@@ -20,6 +20,7 @@ interface CollectionSnapshotRow {
   created_at: string;
   sync_status: Collection["syncStatus"];
   remote_id: string | null;
+  last_synced_at: string | null;
 }
 
 export interface DatabaseInspectionSnapshot {
@@ -35,6 +36,7 @@ export interface DatabaseInspectionSnapshot {
     collectedAt: string;
     syncStatus: Collection["syncStatus"];
     remoteId: string | null;
+    lastSyncedAt: string | null;
   }>;
 }
 
@@ -66,7 +68,7 @@ export const databaseInspectionService = {
         getCount("sync_queue"),
         db.getAllAsync<CollectionSnapshotRow>(
           `
-            SELECT id, material, weight_kg, estimated_weight_kg, collected_at, created_at, sync_status, remote_id
+            SELECT id, material, weight_kg, estimated_weight_kg, collected_at, created_at, sync_status, remote_id, last_synced_at
             FROM collections
             ORDER BY COALESCE(collected_at, created_at) DESC
             LIMIT 8;
@@ -87,6 +89,7 @@ export const databaseInspectionService = {
         collectedAt: row.collected_at ?? row.created_at,
         syncStatus: row.sync_status,
         remoteId: row.remote_id,
+        lastSyncedAt: row.last_synced_at,
       })),
     };
   },

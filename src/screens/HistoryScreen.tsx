@@ -1,8 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Alert,
   ActivityIndicator,
-  Platform,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -12,48 +10,27 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
-import AppButton from "../components/ui/AppButton";
 import AppCard from "../components/ui/AppCard";
+import CollectionListItem from "../components/ui/CollectionListItem";
 import EmptyState from "../components/ui/EmptyState";
-import SectionHeader from "../components/ui/SectionHeader";
+import MaterialChip from "../components/ui/MaterialChip";
 import StatCard from "../components/ui/StatCard";
 import { useCollectionsStore } from "../state/useCollectionsStore";
 import type { Collection, Material } from "../domain/types/collection";
 import colors from "../styles/colors";
 import globalStyles from "../styles/globalStyles";
+import { MATERIAL_LABEL } from "../components/ui/materialMeta";
 
-const MATERIAL_ICON: Record<
-  Material,
-  React.ComponentProps<typeof Ionicons>["name"]
-> = {
-  papel: "document-text-outline",
-  plastico: "water-outline",
-  metal: "hardware-chip-outline",
-  vidro: "wine-outline",
-  outros: "layers-outline",
-};
+type PeriodFilter = "hoje" | "semana" | "mes" | "todos";
 
-const MATERIAL_COLOR: Record<Material, string> = {
-  papel: colors.paper,
-  plastico: colors.plastic,
-  metal: colors.metal,
-  vidro: colors.glass,
-  outros: colors.other,
-};
-
-const MATERIAL_LABEL: Record<Material, string> = {
-  papel: "Papel",
-  plastico: "Plastico",
-  metal: "Metal",
-  vidro: "Vidro",
-  outros: "Outros",
-};
-
-const MATERIAL_FILTERS: Array<{
-  key: Material | "todos";
-  label: string;
-}> = [
+const PERIOD_FILTERS: Array<{ key: PeriodFilter; label: string }> = [
+  { key: "hoje", label: "Hoje" },
+  { key: "semana", label: "Semana" },
+  { key: "mes", label: "Mes" },
   { key: "todos", label: "Todos" },
+];
+
+const MATERIAL_FILTERS: Array<{ key: Material; label: string }> = [
   { key: "papel", label: "Papel" },
   { key: "plastico", label: "Plastico" },
   { key: "metal", label: "Metal" },
@@ -66,106 +43,75 @@ interface HistorySection {
   items: Collection[];
 }
 
-function formatDate(isoString: string): string {
-  return new Date(isoString).toLocaleDateString("pt-BR", {
+interface FilterWindowMeta {
+  title: string;
+  description: string;
+}
+
+function formatSectionDate(date: string): string {
+  return new Date(`${date}T00:00:00.000Z`).toLocaleDateString("pt-BR", {
     day: "2-digit",
     month: "short",
     year: "numeric",
   });
 }
 
-function formatTime(isoString: string): string {
-  return new Date(isoString).toLocaleTimeString("pt-BR", {
+function formatTime(value: string): string {
+  return new Date(value).toLocaleTimeString("pt-BR", {
     hour: "2-digit",
     minute: "2-digit",
   });
 }
 
 function groupHistoryByDate(collections: Collection[]): HistorySection[] {
-  const grouped = collections.reduce<Record<string, Collection[]>>(
-    (acc, collection) => {
-      const date = collection.collectedAt.slice(0, 10);
-      acc[date] = [...(acc[date] ?? []), collection];
-      return acc;
-    },
-    {},
-  );
+  const grouped = collections.reduce<Record<string, Collection[]>>((acc, item) => {
+    const date = item.collectedAt.slice(0, 10);
+    acc[date] = [...(acc[date] ?? []), item];
+    return acc;
+  }, {});
 
-  return Object.entries(grouped).map(([date, items]) => ({ date, items }));
+  return Object.entries(grouped)
+    .map(([date, items]) => ({ date, items }))
+    .sort((a, b) => b.date.localeCompare(a.date));
 }
 
-function HistoryItem({
-  item,
-  onDelete,
-}: {
-  item: Collection;
-  onDelete: (item: Collection) => void;
-}): React.JSX.Element {
-  const hasLocation = item.latitude !== null && item.longitude !== null;
+function getFilterWindowMeta(period: PeriodFilter, material: Material | "todos"): FilterWindowMeta {
+  const materialLabel =
+    material === "todos" ? "todos os materiais" : MATERIAL_LABEL[material].toLowerCase();
 
-  return (
-    <View style={styles.itemCard}>
-      <View
-        style={[
-          styles.itemIconWrap,
-          { backgroundColor: MATERIAL_COLOR[item.material] },
-        ]}
-      >
-        <Ionicons
-          name={MATERIAL_ICON[item.material]}
-          size={20}
-          color={colors.textLight}
-        />
-      </View>
+  if (period === "hoje") {
+    return {
+      title: "Resumo de hoje",
+      description: `Acompanhe o que foi salvo hoje no aparelho em ${materialLabel}.`,
+    };
+  }
 
-      <View style={styles.itemBody}>
-        <Text style={styles.itemTitle}>{MATERIAL_LABEL[item.material]}</Text>
-        <Text style={styles.itemSubtitle}>{item.weightKg.toFixed(1)} kg</Text>
-        {item.notes ? <Text style={styles.itemNote}>{item.notes}</Text> : null}
-      </View>
+  if (period === "semana") {
+    return {
+      title: "Resumo da semana",
+      description: `Veja como sua produtividade evoluiu nesta semana em ${materialLabel}.`,
+    };
+  }
 
-      <View style={styles.itemMeta}>
-        <TouchableOpacity
-          style={styles.deleteButton}
-          onPress={() => onDelete(item)}
-        >
-          <Ionicons name="trash-outline" size={16} color={colors.error} />
-        </TouchableOpacity>
-        <Text style={styles.itemMetaText}>{formatTime(item.collectedAt)}</Text>
-        <View
-          style={[
-            styles.locationBadge,
-            hasLocation ? styles.locationBadgeOk : styles.locationBadgeOff,
-          ]}
-        >
-          <Ionicons
-            name={hasLocation ? "location" : "cloud-offline-outline"}
-            size={12}
-            color={hasLocation ? colors.primaryStrong : colors.textMuted}
-          />
-          <Text
-            style={[
-              styles.locationBadgeText,
-              hasLocation ? styles.locationBadgeTextOk : null,
-            ]}
-          >
-            {hasLocation ? "GPS" : "Sem GPS"}
-          </Text>
-        </View>
-      </View>
-    </View>
-  );
+  if (period === "mes") {
+    return {
+      title: "Resumo do mes",
+      description: `Veja o acumulado do mes e em quais dias ${materialLabel} teve mais volume.`,
+    };
+  }
+
+    return {
+      title: "Resumo completo",
+      description: `Veja todo o historico salvo no aparelho para ${materialLabel}.`,
+    };
 }
 
 const HistoryScreen = (): React.JSX.Element => {
-  const [materialFilter, setMaterialFilter] = useState<Material | "todos">(
-    "todos",
-  );
+  const [periodFilter, setPeriodFilter] = useState<PeriodFilter>("hoje");
+  const [materialFilter, setMaterialFilter] = useState<Material | "todos">("todos");
   const history = useCollectionsStore((state) => state.history);
   const historyStatus = useCollectionsStore((state) => state.historyStatus);
-  const errorMessage = useCollectionsStore((state) => state.errorMessage);
   const loadHistory = useCollectionsStore((state) => state.loadHistory);
-  const deleteCollection = useCollectionsStore((state) => state.deleteCollection);
 
   useEffect(() => {
     void loadHistory(50, 0);
@@ -176,59 +122,78 @@ const HistoryScreen = (): React.JSX.Element => {
   }, [loadHistory]);
 
   const filteredHistory = useMemo(() => {
+    const now = new Date();
+    const periodFiltered = history.filter((item) => {
+      if (periodFilter === "todos") {
+        return true;
+      }
+
+      const collectedAt = new Date(item.collectedAt);
+
+      if (periodFilter === "hoje") {
+        return collectedAt.toDateString() === now.toDateString();
+      }
+
+      if (periodFilter === "semana") {
+        return now.getTime() - collectedAt.getTime() <= 7 * 24 * 60 * 60 * 1000;
+      }
+
+      return (
+        collectedAt.getMonth() === now.getMonth() &&
+        collectedAt.getFullYear() === now.getFullYear()
+      );
+    });
+
     if (materialFilter === "todos") {
-      return history;
+      return periodFiltered;
     }
 
-    return history.filter((item) => item.material === materialFilter);
-  }, [history, materialFilter]);
+    return periodFiltered.filter((item) => item.material === materialFilter);
+  }, [history, materialFilter, periodFilter]);
 
-  const sections = useMemo(
-    () => groupHistoryByDate(filteredHistory),
-    [filteredHistory],
+  const sections = useMemo(() => groupHistoryByDate(filteredHistory), [filteredHistory]);
+  const windowMeta = useMemo(
+    () => getFilterWindowMeta(periodFilter, materialFilter),
+    [materialFilter, periodFilter],
   );
-
   const totalKg = useMemo(
     () => filteredHistory.reduce((total, item) => total + item.weightKg, 0),
     [filteredHistory],
   );
+  const activeDays = sections.length;
+  const averagePerActiveDay = activeDays > 0 ? totalKg / activeDays : 0;
+  const topMaterial = useMemo(() => {
+    const totals = filteredHistory.reduce<Record<Material, number>>(
+      (acc, item) => {
+        acc[item.material] += item.weightKg;
+        return acc;
+      },
+      { papel: 0, plastico: 0, metal: 0, vidro: 0, outros: 0 },
+    );
 
-  const handleDelete = useCallback(
-    (item: Collection) => {
-      const confirmationMessage = `Deseja excluir o registro de ${MATERIAL_LABEL[item.material]} com ${item.weightKg.toFixed(1)} kg?`;
+    const entries = Object.entries(totals) as Array<[Material, number]>;
+    const [material, value] = entries.reduce((current, next) =>
+      next[1] > current[1] ? next : current,
+    );
 
-      if (Platform.OS === "web") {
-        const confirmFn = (
-          globalThis as typeof globalThis & {
-            confirm?: (message?: string) => boolean;
-          }
-        ).confirm;
-        const confirmed = confirmFn?.(confirmationMessage) ?? false;
+    return value > 0 ? MATERIAL_LABEL[material] : "Sem destaque";
+  }, [filteredHistory]);
+  const bestSection = useMemo(() => {
+    if (sections.length === 0) {
+      return null;
+    }
 
-        if (confirmed) {
-          void deleteCollection(item.id);
-        }
-
-        return;
-      }
-
-      Alert.alert(
-        "Excluir coleta",
-        confirmationMessage,
-        [
-          { text: "Cancelar", style: "cancel" },
-          {
-            text: "Excluir",
-            style: "destructive",
-            onPress: () => {
-              void deleteCollection(item.id);
-            },
-          },
-        ],
+    return sections.reduce((current, section) => {
+      const sectionTotal = section.items.reduce((total, item) => total + item.weightKg, 0);
+      const currentTotal = current.items.reduce(
+        (total, item) => total + item.weightKg,
+        0,
       );
-    },
-    [deleteCollection],
-  );
+
+      return sectionTotal > currentTotal ? section : current;
+    });
+  }, [sections]);
+  const latestCollection = filteredHistory[0] ?? null;
 
   if (historyStatus === "loading" && history.length === 0) {
     return (
@@ -242,7 +207,7 @@ const HistoryScreen = (): React.JSX.Element => {
   return (
     <ScrollView
       style={globalStyles.container}
-      contentContainerStyle={globalStyles.screenContent}
+      contentContainerStyle={styles.content}
       refreshControl={
         <RefreshControl
           refreshing={historyStatus === "loading" && history.length > 0}
@@ -253,61 +218,100 @@ const HistoryScreen = (): React.JSX.Element => {
       showsVerticalScrollIndicator={false}
     >
       <View style={styles.hero}>
-        <SectionHeader
-          eyebrow="Memoria operacional"
-          title="Historico de coletas."
-          iconName="time-outline"
-        />
-        <Text style={styles.heroSubtitle}>
-          Revise seus registros recentes, identifique volume acumulado e acompanhe consistencia.
-        </Text>
-
-        <View style={styles.heroMetrics}>
-          <AppCard style={styles.heroMetricCard}>
-            <Text style={styles.heroMetricValue}>{filteredHistory.length}</Text>
-            <Text style={styles.heroMetricLabel}>registros listados</Text>
-          </AppCard>
-          <AppCard style={styles.heroMetricCard}>
-            <Text style={styles.heroMetricValue}>{totalKg.toFixed(1)} kg</Text>
-            <Text style={styles.heroMetricLabel}>volume no filtro atual</Text>
-          </AppCard>
+        <View style={styles.heroRow}>
+          <TouchableOpacity style={styles.heroBack}>
+            <Ionicons name="arrow-back" size={24} color={colors.textLight} />
+          </TouchableOpacity>
+          <View style={styles.heroText}>
+            <Text style={styles.heroTitle}>Historico de coletas</Text>
+            <Text style={styles.heroDescription}>
+              Veja suas coletas recentes e acompanhe sua evolucao.
+            </Text>
+          </View>
+          <View style={styles.heroCalendar}>
+            <Ionicons name="calendar-outline" size={22} color={colors.textLight} />
+          </View>
         </View>
       </View>
 
-      <View style={styles.filterSection}>
-        <SectionHeader eyebrow="Organizacao" title="Filtrar historico" />
-        <View style={styles.filterStatsRow}>
-          <StatCard value={String(sections.length)} label="dias exibidos" />
-          <StatCard
-            value={
-              materialFilter === "todos"
-                ? "Todos"
-                : MATERIAL_LABEL[materialFilter]
-            }
-            label="filtro ativo"
-          />
-        </View>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.filterChipsRow}
-        >
-          {MATERIAL_FILTERS.map((filter) => {
-            const active = filter.key === materialFilter;
+      <View style={styles.summaryRow}>
+        <StatCard
+          value={String(filteredHistory.length)}
+          label="registros"
+          helperText={activeDays > 0 ? `${activeDays} dias com coleta` : "Sem dias ativos"}
+          iconName="document-text-outline"
+        />
+        <StatCard
+          value={`${totalKg.toFixed(1)} kg`}
+          label={periodFilter === "hoje" ? "total do dia" : "total do periodo"}
+          helperText={`${averagePerActiveDay.toFixed(1)} kg por dia ativo`}
+          iconName="leaf-outline"
+        />
+        <StatCard
+          value={topMaterial}
+          label="material em destaque"
+          helperText={
+            latestCollection
+              ? `Ultimo registro as ${formatTime(latestCollection.collectedAt)}`
+              : "Sem registros para comparar"
+          }
+          iconName="ribbon-outline"
+        />
+      </View>
 
+      <AppCard style={styles.summaryInsightCard}>
+        <View style={styles.summaryInsightHeader}>
+          <View style={styles.summaryInsightText}>
+            <Text style={styles.summaryInsightTitle}>{windowMeta.title}</Text>
+            <Text style={styles.summaryInsightDescription}>{windowMeta.description}</Text>
+          </View>
+          <View style={styles.summaryInsightIcon}>
+            <Ionicons name="analytics-outline" size={20} color={colors.primaryStrong} />
+          </View>
+        </View>
+
+        <View style={styles.summaryInsightRow}>
+          <View style={styles.summaryInsightMetric}>
+            <Text style={styles.summaryInsightLabel}>Melhor dia</Text>
+            <Text style={styles.summaryInsightValue}>
+              {bestSection ? formatSectionDate(bestSection.date) : "Sem registros"}
+            </Text>
+          </View>
+          <View style={styles.summaryInsightMetric}>
+            <Text style={styles.summaryInsightLabel}>Produziu</Text>
+            <Text style={styles.summaryInsightValue}>
+              {bestSection
+                ? `${bestSection.items
+                    .reduce((total, item) => total + item.weightKg, 0)
+                    .toFixed(1)} kg`
+                : "0.0 kg"}
+            </Text>
+          </View>
+          <View style={styles.summaryInsightMetric}>
+            <Text style={styles.summaryInsightLabel}>Filtro atual</Text>
+            <Text style={styles.summaryInsightValue}>
+              {materialFilter === "todos" ? "Todos" : MATERIAL_LABEL[materialFilter]}
+            </Text>
+          </View>
+        </View>
+      </AppCard>
+
+      <AppCard style={styles.filtersCard}>
+        <Text style={styles.filtersTitle}>Filtrar historico</Text>
+
+        <View style={styles.periodRow}>
+          {PERIOD_FILTERS.map((filter) => {
+            const active = filter.key === periodFilter;
             return (
               <TouchableOpacity
                 key={filter.key}
-                style={[
-                  styles.filterChip,
-                  active ? styles.filterChipActive : null,
-                ]}
-                onPress={() => setMaterialFilter(filter.key)}
+                style={[styles.periodButton, active ? styles.periodButtonActive : null]}
+                onPress={() => setPeriodFilter(filter.key)}
               >
                 <Text
                   style={[
-                    styles.filterChipText,
-                    active ? styles.filterChipTextActive : null,
+                    styles.periodButtonText,
+                    active ? styles.periodButtonTextActive : null,
                   ]}
                 >
                   {filter.label}
@@ -315,65 +319,104 @@ const HistoryScreen = (): React.JSX.Element => {
               </TouchableOpacity>
             );
           })}
-        </ScrollView>
-      </View>
+        </View>
 
-      {historyStatus === "error" && (
-        <AppCard style={styles.feedbackCard}>
-          <Text style={styles.errorText}>
-            Erro ao carregar: {errorMessage ?? "falha desconhecida"}
-          </Text>
-          <AppButton
-            label="Tentar novamente"
-            onPress={handleRefresh}
-            style={styles.retryButton}
-          />
-        </AppCard>
-      )}
+        <View style={styles.materialRow}>
+          {MATERIAL_FILTERS.map((filter) => (
+            <MaterialChip
+              key={filter.key}
+              material={filter.key}
+              active={materialFilter === filter.key}
+              onPress={() => setMaterialFilter(filter.key)}
+            />
+          ))}
+          <TouchableOpacity
+            style={[
+              styles.allMaterialsChip,
+              materialFilter === "todos" ? styles.allMaterialsChipActive : null,
+            ]}
+            onPress={() => setMaterialFilter("todos")}
+          >
+            <View
+              style={[
+                styles.allMaterialsIconWrap,
+                materialFilter === "todos"
+                  ? styles.allMaterialsIconWrapActive
+                  : null,
+              ]}
+            >
+              <Ionicons
+                name="grid-outline"
+                size={14}
+                color={
+                  materialFilter === "todos"
+                    ? colors.textLight
+                    : colors.primaryStrong
+                }
+              />
+            </View>
+            <Text
+              style={[
+                styles.allMaterialsText,
+                materialFilter === "todos" ? styles.allMaterialsTextActive : null,
+              ]}
+            >
+              Todos
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </AppCard>
 
-      {filteredHistory.length === 0 && (
+      {filteredHistory.length === 0 ? (
         <EmptyState
           title="Nenhuma coleta encontrada"
-          description="Ajuste o filtro ativo ou registre novas coletas para popular o historico."
+            description="Ajuste o periodo ou o material, ou salve novas coletas para preencher seu historico."
+          iconName="time-outline"
+          actionLabel="Atualizar lista"
+          onAction={handleRefresh}
         />
+      ) : (
+        sections.map((section) => {
+          const sectionTotal = section.items.reduce(
+            (total, item) => total + item.weightKg,
+            0,
+          );
+
+          return (
+            <View key={section.date} style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>{formatSectionDate(section.date)}</Text>
+                <Text style={styles.sectionMeta}>
+                  {section.items.length} coletas - {sectionTotal.toFixed(1)} kg
+                </Text>
+              </View>
+
+              <View style={styles.itemsColumn}>
+                {section.items.map((item) => (
+                  <CollectionListItem
+                    key={item.id}
+                    item={item}
+                    showChevron
+                    subtitle={item.notes ?? "Coleta salva e pronta para futuras acoes"}
+                  />
+                ))}
+              </View>
+            </View>
+          );
+        })
       )}
 
-      {sections.map((section) => {
-        const sectionTotal = section.items.reduce(
-          (total, item) => total + item.weightKg,
-          0,
-        );
-
-        return (
-          <View key={section.date} style={styles.sectionBlock}>
-            <View style={styles.sectionHeader}>
-              <View>
-                <Text style={styles.sectionDate}>
-                  {formatDate(`${section.date}T00:00:00.000Z`)}
-                </Text>
-                <Text style={styles.sectionCount}>
-                  {section.items.length} registros
-                </Text>
-              </View>
-              <View style={styles.sectionTotalPill}>
-                <Text style={styles.sectionTotalPillText}>
-                  {sectionTotal.toFixed(1)} kg
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.itemsColumn}>
-              {section.items.map((item) => (
-                <HistoryItem
-                  key={item.id}
-                  item={item}
-                  onDelete={handleDelete}
-                />
-              ))}
-            </View>
-          </View>
-        );
-      })}
+      <AppCard muted style={styles.tipCard}>
+        <View style={styles.tipIcon}>
+          <Ionicons name="bulb-outline" size={22} color={colors.primaryStrong} />
+        </View>
+        <View style={styles.tipBody}>
+          <Text style={styles.tipTitle}>Dica pratica:</Text>
+          <Text style={styles.tipText}>
+            Separe os materiais antes da pesagem para agilizar o registro e manter seu dia mais organizado.
+          </Text>
+        </View>
+      </AppCard>
     </ScrollView>
   );
 };
@@ -391,200 +434,243 @@ const styles = StyleSheet.create({
     fontSize: 15,
     marginTop: 12,
   },
-  hero: {
-    backgroundColor: colors.surface,
-    borderRadius: 24,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: colors.border,
-    marginBottom: 18,
+  content: {
+    width: "100%",
+    maxWidth: 900,
+    alignSelf: "center",
+    paddingHorizontal: 20,
+    paddingTop: 24,
+    paddingBottom: 36,
+    gap: 18,
   },
-  heroSubtitle: {
+  hero: {
+    backgroundColor: colors.primaryStrong,
+    borderRadius: 30,
+    padding: 24,
+  },
+  heroRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 16,
+  },
+  heroBack: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  heroText: {
+    flex: 1,
+  },
+  heroCalendar: {
+    width: 54,
+    height: 54,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.12)",
+  },
+  heroTitle: {
+    color: colors.textLight,
+    fontSize: 34,
+    lineHeight: 40,
+    fontWeight: "800",
+  },
+  heroDescription: {
+    color: "rgba(255,255,255,0.9)",
+    fontSize: 16,
+    lineHeight: 24,
+    marginTop: 10,
+  },
+  summaryRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 14,
+  },
+  summaryInsightCard: {
+    gap: 16,
+  },
+  summaryInsightHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 12,
+  },
+  summaryInsightText: {
+    flex: 1,
+  },
+  summaryInsightTitle: {
+    color: colors.text,
+    fontSize: 20,
+    fontWeight: "800",
+  },
+  summaryInsightDescription: {
     color: colors.textMuted,
-    fontSize: 15,
+    fontSize: 14,
     lineHeight: 22,
     marginTop: 8,
   },
-  heroMetrics: {
+  summaryInsightIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.primarySoft,
+  },
+  summaryInsightRow: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 12,
-    marginTop: 18,
   },
-  heroMetricCard: {
+  summaryInsightMetric: {
     flexGrow: 1,
     minWidth: 150,
-    backgroundColor: colors.surfaceMuted,
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: 18,
-    padding: 14,
-  },
-  heroMetricValue: {
-    color: colors.text,
-    fontSize: 24,
-    fontWeight: "800",
-  },
-  heroMetricLabel: {
-    color: colors.textMuted,
-    fontSize: 13,
-    marginTop: 4,
-  },
-  filterSection: {
-    marginBottom: 18,
-  },
-  filterStatsRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
-    marginTop: 14,
-  },
-  filterChipsRow: {
-    gap: 10,
-    paddingTop: 14,
-    paddingBottom: 4,
-  },
-  filterChip: {
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 999,
     paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingVertical: 14,
+    backgroundColor: colors.surfaceMuted,
   },
-  filterChipActive: {
-    backgroundColor: colors.primarySoft,
-    borderColor: colors.primary,
-  },
-  filterChipText: {
+  summaryInsightLabel: {
     color: colors.textMuted,
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
   },
-  filterChipTextActive: {
-    color: colors.primaryStrong,
-  },
-  feedbackCard: {
-    marginBottom: 16,
-  },
-  errorText: {
-    color: colors.error,
+  summaryInsightValue: {
+    color: colors.text,
     fontSize: 15,
-    lineHeight: 21,
+    fontWeight: "800",
+    marginTop: 8,
   },
-  retryButton: {
-    marginTop: 12,
-    alignSelf: "flex-start",
+  filtersCard: {
+    gap: 16,
   },
-  sectionBlock: {
-    marginBottom: 18,
-  },
-  sectionHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 10,
-  },
-  sectionDate: {
+  filtersTitle: {
     color: colors.text,
     fontSize: 18,
     fontWeight: "800",
   },
-  sectionCount: {
-    color: colors.textMuted,
-    fontSize: 13,
-    marginTop: 2,
-  },
-  sectionTotalPill: {
-    backgroundColor: colors.primarySoft,
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-  },
-  sectionTotalPillText: {
-    color: colors.primaryStrong,
-    fontSize: 12,
-    fontWeight: "800",
-  },
-  itemsColumn: {
+  periodRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
     gap: 10,
   },
-  itemCard: {
+  periodButton: {
+    flexGrow: 1,
+    minWidth: 110,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: "center",
+    backgroundColor: colors.surface,
+  },
+  periodButtonActive: {
+    borderColor: colors.primary,
+    backgroundColor: "#F4FBF5",
+  },
+  periodButtonText: {
+    color: colors.textMuted,
+    fontSize: 15,
+    fontWeight: "600",
+  },
+  periodButtonTextActive: {
+    color: colors.primaryStrong,
+    fontWeight: "800",
+  },
+  materialRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  allMaterialsChip: {
+    flexDirection: "row",
+    alignItems: "center",
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: 20,
-    padding: 14,
-    flexDirection: "row",
-    alignItems: "center",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
   },
-  itemIconWrap: {
-    width: 44,
-    height: 44,
-    borderRadius: 16,
+  allMaterialsChipActive: {
+    backgroundColor: colors.primarySoft,
+    borderColor: colors.primary,
+  },
+  allMaterialsIconWrap: {
+    width: 22,
+    height: 22,
+    borderRadius: 999,
     alignItems: "center",
     justifyContent: "center",
-    marginRight: 12,
+    backgroundColor: colors.primarySoft,
+    marginRight: 8,
   },
-  itemBody: {
+  allMaterialsIconWrapActive: {
+    backgroundColor: colors.primary,
+  },
+  allMaterialsText: {
+    color: colors.text,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  allMaterialsTextActive: {
+    color: colors.primaryStrong,
+  },
+  section: {
+    gap: 12,
+  },
+  sectionHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  sectionTitle: {
+    color: colors.text,
+    fontSize: 18,
+    fontWeight: "800",
+  },
+  sectionMeta: {
+    color: colors.primaryStrong,
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  itemsColumn: {
+    gap: 12,
+  },
+  tipCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+  },
+  tipIcon: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: "#DDEEDF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  tipBody: {
     flex: 1,
   },
-  itemTitle: {
+  tipTitle: {
     color: colors.text,
     fontSize: 16,
     fontWeight: "800",
   },
-  itemSubtitle: {
+  tipText: {
     color: colors.textMuted,
-    fontSize: 13,
-    marginTop: 3,
-  },
-  itemNote: {
-    color: colors.textMuted,
-    fontSize: 12,
+    fontSize: 14,
+    lineHeight: 22,
     marginTop: 6,
-    fontStyle: "italic",
-  },
-  itemMeta: {
-    alignItems: "flex-end",
-    marginLeft: 12,
-  },
-  deleteButton: {
-    width: 30,
-    height: 30,
-    borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#FBEAEA",
-    marginBottom: 8,
-  },
-  itemMetaText: {
-    color: colors.textMuted,
-    fontSize: 12,
-    fontWeight: "700",
-  },
-  locationBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    marginTop: 8,
-  },
-  locationBadgeOk: {
-    backgroundColor: colors.primarySoft,
-  },
-  locationBadgeOff: {
-    backgroundColor: colors.surfaceMuted,
-  },
-  locationBadgeText: {
-    color: colors.textMuted,
-    fontSize: 10,
-    fontWeight: "800",
-  },
-  locationBadgeTextOk: {
-    color: colors.primaryStrong,
   },
 });
 

@@ -1,17 +1,22 @@
 import React, { useCallback, useEffect, useMemo } from "react";
 import {
   ActivityIndicator,
+  Image,
   Linking,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
+  useWindowDimensions,
 } from "react-native";
-import MapView, { Marker, PROVIDER_DEFAULT } from "react-native-maps";
+import MapView, { Marker, Polyline, PROVIDER_DEFAULT } from "react-native-maps";
 import { Ionicons } from "@expo/vector-icons";
 
-import type { CollectionPoint } from "../domain/types/collectionPoint";
+import AppCard from "../components/ui/AppCard";
+import EmptyState from "../components/ui/EmptyState";
+import PrimaryButton from "../components/ui/PrimaryButton";
+import RouteSuggestionCard from "../components/ui/RouteSuggestionCard";
 import { useRoutesStore } from "../state/useRoutesStore";
 import { buildGoogleMapsDirectionsUrl } from "../utils/maps";
 import colors from "../styles/colors";
@@ -23,8 +28,11 @@ const DEFAULT_REGION = {
   longitudeDelta: 0.08,
 };
 
-function getPointDescription(point: CollectionPoint): string {
-  return point.address ?? point.materialType ?? "Ponto de reciclavel";
+function getPointDescription(point: {
+  address: string | null;
+  materialType: string | null;
+}): string {
+  return point.address ?? point.materialType ?? "Ponto de coleta";
 }
 
 function formatDistance(distanceMeters: number | null): string {
@@ -51,231 +59,332 @@ function formatDuration(durationSeconds: number | null): string {
   return `${hours}h ${minutes}min`;
 }
 
+function decodePolyline(polyline: string | null): Array<{ latitude: number; longitude: number }> {
+  if (!polyline) {
+    return [];
+  }
+
+  let index = 0;
+  let latitude = 0;
+  let longitude = 0;
+  const coordinates: Array<{ latitude: number; longitude: number }> = [];
+
+  while (index < polyline.length) {
+    let shift = 0;
+    let result = 0;
+    let byte = 0;
+
+    do {
+      byte = polyline.charCodeAt(index++) - 63;
+      result |= (byte & 0x1f) << shift;
+      shift += 5;
+    } while (byte >= 0x20);
+
+    const deltaLatitude = result & 1 ? ~(result >> 1) : result >> 1;
+    latitude += deltaLatitude;
+
+    shift = 0;
+    result = 0;
+
+    do {
+      byte = polyline.charCodeAt(index++) - 63;
+      result |= (byte & 0x1f) << shift;
+      shift += 5;
+    } while (byte >= 0x20);
+
+    const deltaLongitude = result & 1 ? ~(result >> 1) : result >> 1;
+    longitude += deltaLongitude;
+
+    coordinates.push({
+      latitude: latitude / 1e5,
+      longitude: longitude / 1e5,
+    });
+  }
+
+  return coordinates;
+}
+
+function getProviderLabel(provider: "none" | "osrm" | "mapbox" | "google"): string {
+  if (provider === "osrm") {
+    return "Rota otimizada com apoio do servico de percurso.";
+  }
+
+  if (provider === "google") {
+    return "Rota sugerida com apoio do Google.";
+  }
+
+  if (provider === "mapbox") {
+    return "Rota sugerida com apoio do Mapbox.";
+  }
+
+  return "Rota simples montada no aparelho para nao travar seu fluxo.";
+}
+
 const RoutesScreen = (): React.JSX.Element => {
+  const { width } = useWindowDimensions();
+  const isWide = width >= 980;
   const currentLocation = useRoutesStore((state) => state.currentLocation);
   const points = useRoutesStore((state) => state.points);
-  const selectedPoint = useRoutesStore((state) => state.selectedPoint);
   const plannedRoute = useRoutesStore((state) => state.plannedRoute);
   const isLoading = useRoutesStore((state) => state.isLoading);
   const error = useRoutesStore((state) => state.error);
-  const locationPermissionDenied = useRoutesStore(
-    (state) => state.locationPermissionDenied,
-  );
-  const lastLoadUsedCache = useRoutesStore((state) => state.lastLoadUsedCache);
   const refreshPoints = useRoutesStore((state) => state.refreshPoints);
-  const selectPoint = useRoutesStore((state) => state.selectPoint);
+  const lastLoadUsedCache = useRoutesStore((state) => state.lastLoadUsedCache);
 
   useEffect(() => {
     void refreshPoints();
   }, [refreshPoints]);
 
-  const handleOpenDirections = useCallback(async () => {
-    if (!selectedPoint) {
+  const routePoints = plannedRoute?.orderedPoints.length
+    ? plannedRoute.orderedPoints
+    : points;
+
+  const routeCoordinates = useMemo(
+    () => decodePolyline(plannedRoute?.polyline ?? null),
+    [plannedRoute?.polyline],
+  );
+
+  const firstPoint = routePoints[0] ?? null;
+  const provider = plannedRoute?.provider ?? "none";
+  const isFallbackRoute = provider === "none" || routeCoordinates.length < 2;
+  const routeSummaryText = firstPoint
+    ? `Comece por ${firstPoint.name} e siga a ordem sugerida para ganhar tempo no percurso.`
+    : "Busque pontos proximos para montar sua primeira rota do dia.";
+  const sourceLabel = lastLoadUsedCache
+    ? "Usando pontos salvos no aparelho"
+    : "Usando pontos atualizados da busca mais recente";
+
+  const handleStartRoute = useCallback(async () => {
+    if (!firstPoint) {
       return;
     }
 
     await Linking.openURL(
-      buildGoogleMapsDirectionsUrl(
-        selectedPoint.latitude,
-        selectedPoint.longitude,
-      ),
+      buildGoogleMapsDirectionsUrl(firstPoint.latitude, firstPoint.longitude),
     );
-  }, [selectedPoint]);
+  }, [firstPoint]);
 
-  const mapRegion = currentLocation
-    ? {
-        latitude: currentLocation.latitude,
-        longitude: currentLocation.longitude,
-        latitudeDelta: 0.04,
-        longitudeDelta: 0.04,
-      }
-    : DEFAULT_REGION;
-
-  const closestPoint = useMemo(() => points[0] ?? null, [points]);
+  const mapRegion =
+    currentLocation ?? firstPoint
+      ? {
+          latitude: (currentLocation ?? firstPoint)!.latitude,
+          longitude: (currentLocation ?? firstPoint)!.longitude,
+          latitudeDelta: 0.03,
+          longitudeDelta: 0.03,
+        }
+      : DEFAULT_REGION;
 
   return (
-    <View style={styles.screen}>
-      <MapView
-        key={currentLocation ? "with-current-location" : "default-location"}
-        style={styles.map}
-        provider={PROVIDER_DEFAULT}
-        initialRegion={mapRegion}
-        showsUserLocation={currentLocation !== null}
-        showsMyLocationButton
-      >
-        {currentLocation && (
-          <Marker
-            coordinate={currentLocation}
-            title="Sua localizacao"
-            pinColor={colors.secondary}
-          />
-        )}
-
-        {points.map((point) => (
-          <Marker
-            key={point.id}
-            coordinate={{
-              latitude: point.latitude,
-              longitude: point.longitude,
-            }}
-            title={point.name}
-            description={getPointDescription(point)}
-            pinColor={point.source === "osm" ? colors.primary : colors.accent}
-            onPress={() => selectPoint(point)}
-          />
-        ))}
-      </MapView>
-
-      <View style={styles.topOverlay}>
-        <View style={styles.topCard}>
-          <View style={styles.topCardHeader}>
-            <View style={styles.topCardTitleWrap}>
-              <Text style={styles.topEyebrow}>Rotas</Text>
-              <Text style={styles.topTitle}>Planeje sua proxima parada</Text>
-            </View>
-
-            <TouchableOpacity
-              style={styles.refreshButton}
-              onPress={() => void refreshPoints()}
-              disabled={isLoading}
-            >
-              {isLoading ? (
-                <ActivityIndicator size="small" color={colors.textLight} />
-              ) : (
-                <Ionicons name="refresh" size={20} color={colors.textLight} />
-              )}
-            </TouchableOpacity>
+    <ScrollView
+      style={styles.screen}
+      contentContainerStyle={styles.content}
+      showsVerticalScrollIndicator={false}
+    >
+      <View style={styles.hero}>
+        <Image
+          source={require("../../assets/brand/brand-mark.png")}
+          style={styles.heroLeaf}
+          resizeMode="contain"
+        />
+        <Text style={styles.heroTitle}>Planejar rota</Text>
+        <Text style={styles.heroDescription}>
+          Organize os pontos de coleta e siga um percurso mais eficiente no seu dia.
+        </Text>
+        <View style={styles.heroMetaRow}>
+          <View style={styles.heroPill}>
+            <Text style={styles.heroPillText}>Rota do dia</Text>
           </View>
-
-          <View style={styles.metricsRow}>
-            <View style={styles.metricPill}>
-              <Text style={styles.metricPillValue}>{points.length}</Text>
-              <Text style={styles.metricPillLabel}>paradas</Text>
-            </View>
-            <View style={styles.metricPill}>
-              <Text style={styles.metricPillValue}>
-                {lastLoadUsedCache ? "Offline" : "Online"}
-              </Text>
-              <Text style={styles.metricPillLabel}>fonte atual</Text>
-            </View>
-            <View style={styles.metricPill}>
-              <Text style={styles.metricPillValue}>
-                {plannedRoute?.provider === "osrm" ? "OSRM" : "Fallback"}
-              </Text>
-              <Text style={styles.metricPillLabel}>roteirizacao</Text>
-            </View>
+          <View style={styles.heroPillMuted}>
+            <Ionicons name="navigate-outline" size={14} color={colors.textLight} />
+            <Text style={styles.heroPillText}>{routePoints.length} paradas</Text>
           </View>
-
-          {closestPoint && (
-            <Text style={styles.inlineHint}>Primeiro destaque: {closestPoint.name}</Text>
-          )}
-
-          {locationPermissionDenied && (
-            <Text style={styles.warningText}>
-              Permissao de localizacao negada. O app mostra pontos salvos localmente.
-            </Text>
-          )}
-          {error && <Text style={styles.errorText}>{error}</Text>}
         </View>
       </View>
 
-      {plannedRoute && (
-        <View style={styles.routeSummaryOverlay}>
-          <View style={styles.routeSummaryCard}>
-            <Text style={styles.routeSummaryEyebrow}>Rota sugerida</Text>
-            <Text style={styles.routeSummaryTitle}>
-              {formatDistance(plannedRoute.distanceMeters)} • {formatDuration(plannedRoute.durationSeconds)}
-            </Text>
-            <Text style={styles.routeSummaryText}>
-              {plannedRoute.provider === "osrm"
-                ? "Ordem calculada por rota real de vias."
-                : "Ordem mantida como fallback enquanto a API nao respondeu."}
-            </Text>
+      {isLoading ? (
+        <AppCard>
+          <View style={styles.loadingRow}>
+            <ActivityIndicator size="small" color={colors.primary} />
+            <Text style={styles.loadingText}>Montando rota sugerida...</Text>
           </View>
-        </View>
-      )}
+        </AppCard>
+      ) : null}
 
-      {!selectedPoint && points.length > 0 && (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.bottomListContent}
-          style={styles.bottomList}
-        >
-          {points.slice(0, 10).map((point, index) => (
-            <TouchableOpacity
-              key={point.id}
-              style={[
-                styles.pointCard,
-                index === 0 ? styles.pointCardFeatured : null,
-              ]}
-              onPress={() => selectPoint(point)}
-            >
-              <Text style={styles.pointCardIndex}>{String(index + 1).padStart(2, "0")}</Text>
-              <Text style={styles.pointCardTitle} numberOfLines={1}>
-                {point.name}
-              </Text>
-              <Text style={styles.pointCardText} numberOfLines={2}>
-                {getPointDescription(point)}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-      )}
+      {routePoints.length === 0 && !isLoading ? (
+        <EmptyState
+          title="Nenhum ponto de coleta cadastrado ainda."
+          description="Atualize quando estiver online ou permita a localizacao para buscar pontos proximos ao aparelho."
+          iconName="map-outline"
+          actionLabel="Atualizar agora"
+          onAction={() => void refreshPoints()}
+        />
+      ) : null}
 
-      {points.length === 0 && !isLoading && (
-        <View style={styles.emptySheet}>
-          <Text style={styles.emptyTitle}>Nenhum ponto encontrado</Text>
-          <Text style={styles.emptyText}>
-            Atualize quando estiver online ou permita a localizacao para buscar pontos proximos.
-          </Text>
-        </View>
-      )}
+      {routePoints.length > 0 ? (
+        <>
+          <RouteSuggestionCard
+            pointsCount={routePoints.length}
+            distanceLabel={formatDistance(plannedRoute?.distanceMeters ?? null)}
+            durationLabel={formatDuration(plannedRoute?.durationSeconds ?? null)}
+            providerLabel={getProviderLabel(provider)}
+            helperText={routeSummaryText}
+            badgeLabel={isFallbackRoute ? "Modo simples" : "Rota otimizada"}
+            onStart={() => {
+              void handleStartRoute();
+            }}
+          />
 
-      {selectedPoint && (
-        <View style={styles.detailSheet}>
-          <View style={styles.detailHandle} />
-          <Text style={styles.detailTitle}>{selectedPoint.name}</Text>
-          <Text style={styles.detailText}>{getPointDescription(selectedPoint)}</Text>
-          <Text style={styles.detailCoordinates}>
-            {selectedPoint.latitude.toFixed(5)}, {selectedPoint.longitude.toFixed(5)}
-          </Text>
+          <View style={styles.insightRow}>
+            <AppCard style={styles.insightCard}>
+              <View style={styles.insightIcon}>
+                <Ionicons name="flag-outline" size={18} color={colors.primaryStrong} />
+              </View>
+              <View style={styles.insightBody}>
+                <Text style={styles.insightLabel}>Primeira parada</Text>
+                <Text style={styles.insightValue}>
+                  {firstPoint ? firstPoint.name : "Sem parada definida"}
+                </Text>
+                <Text style={styles.insightHelper}>
+                  {firstPoint ? getPointDescription(firstPoint) : "Atualize os pontos para montar a rota"}
+                </Text>
+              </View>
+            </AppCard>
 
-          <View style={styles.detailTags}>
-            <View style={styles.tag}>
-              <Text style={styles.tagText}>
-                {selectedPoint.source === "osm" ? "Origem OSM" : "Origem local"}
+            <AppCard style={styles.insightCard}>
+              <View style={styles.insightIcon}>
+                <Ionicons
+                  name={lastLoadUsedCache ? "cloud-offline-outline" : "cloud-done-outline"}
+                  size={18}
+                  color={colors.primaryStrong}
+                />
+              </View>
+              <View style={styles.insightBody}>
+                <Text style={styles.insightLabel}>Origem dos dados</Text>
+                <Text style={styles.insightValue}>{lastLoadUsedCache ? "Salvos no aparelho" : "Busca mais recente"}</Text>
+                <Text style={styles.insightHelper}>{sourceLabel}</Text>
+              </View>
+            </AppCard>
+          </View>
+
+          <AppCard style={styles.routeCard}>
+            <View style={styles.cardHeader}>
+              <Text style={styles.cardTitle}>Mapa do percurso</Text>
+              <View style={styles.cardBadge}>
+                <Text style={styles.cardBadgeText}>
+                  {isFallbackRoute ? "Sem linha otimizada" : "Percurso otimizado"}
+                </Text>
+              </View>
+            </View>
+
+            <View style={[styles.mapWrap, { height: isWide ? 360 : 300 }]}>
+              <MapView
+                style={styles.map}
+                provider={PROVIDER_DEFAULT}
+                initialRegion={mapRegion}
+                scrollEnabled={false}
+                rotateEnabled={false}
+                pitchEnabled={false}
+                zoomEnabled={false}
+              >
+                {routePoints.map((point, index) => (
+                  <Marker
+                    key={point.id}
+                    coordinate={{
+                      latitude: point.latitude,
+                      longitude: point.longitude,
+                    }}
+                    title={point.name}
+                    description={getPointDescription(point)}
+                  >
+                    <View style={styles.markerBubble}>
+                      <Text style={styles.markerText}>{index + 1}</Text>
+                    </View>
+                  </Marker>
+                ))}
+                {routeCoordinates.length > 1 ? (
+                  <Polyline
+                    coordinates={routeCoordinates}
+                    strokeColor={colors.primary}
+                    strokeWidth={5}
+                  />
+                ) : null}
+              </MapView>
+            </View>
+
+            <Text style={styles.mapHelper}>
+              {isFallbackRoute
+                ? "O app montou uma ordem simples no aparelho para nao travar seu dia. Quando houver dados completos, a linha da rota aparece aqui."
+                : "Use o mapa para entender a sequencia sugerida antes de sair para a rua."}
+            </Text>
+          </AppCard>
+
+          <AppCard style={styles.pointsCard}>
+            <View style={styles.cardHeader}>
+              <Text style={styles.cardTitle}>Pontos da rota</Text>
+              <Text style={styles.cardCaption}>Siga a ordem para ganhar tempo no percurso</Text>
+            </View>
+
+            <View style={styles.pointsList}>
+              {routePoints.map((point, index) => (
+                <View key={point.id} style={styles.pointRow}>
+                  <View style={styles.pointIndexColumn}>
+                    <View style={styles.pointIndexBubble}>
+                      <Text style={styles.pointIndexText}>{index + 1}</Text>
+                    </View>
+                    {index < routePoints.length - 1 ? <View style={styles.pointLine} /> : null}
+                  </View>
+
+                  <View style={styles.pointBody}>
+                    <Text style={styles.pointTitle}>{point.name}</Text>
+                    <Text style={styles.pointSubtitle}>{getPointDescription(point)}</Text>
+                    {index === 0 ? (
+                      <View style={styles.pointBadge}>
+                        <Text style={styles.pointBadgeText}>Comece por aqui</Text>
+                      </View>
+                    ) : null}
+                  </View>
+
+                  <TouchableOpacity
+                    style={styles.pointAction}
+                    onPress={() =>
+                      void Linking.openURL(
+                        buildGoogleMapsDirectionsUrl(point.latitude, point.longitude),
+                      )
+                    }
+                  >
+                    <Ionicons name="location-outline" size={20} color={colors.textMuted} />
+                  </TouchableOpacity>
+                  <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+                </View>
+              ))}
+            </View>
+
+            <PrimaryButton
+              label="Iniciar rota"
+              iconName="play-outline"
+              onPress={() => {
+                void handleStartRoute();
+              }}
+              style={styles.startButton}
+            />
+          </AppCard>
+
+          <AppCard muted style={styles.helperCard}>
+            <View style={styles.helperIcon}>
+              <Ionicons name="scan-outline" size={22} color={colors.primaryStrong} />
+            </View>
+            <View style={styles.helperBody}>
+              <Text style={styles.helperTitle}>Adicione mais pontos para melhorar a rota.</Text>
+              <Text style={styles.helperText}>
+                Quanto mais pontos relevantes, mais inteligente pode ficar a rota sugerida.
               </Text>
             </View>
-            {selectedPoint.materialType ? (
-              <View style={styles.tag}>
-                <Text style={styles.tagText}>{selectedPoint.materialType}</Text>
-              </View>
-            ) : null}
-          </View>
+          </AppCard>
+        </>
+      ) : null}
 
-          <Text style={styles.futureHint}>
-            Proximo passo de produto: calcular ordem ideal entre varios pontos usando API de rotas.
-          </Text>
-
-          <View style={styles.actionsRow}>
-            <TouchableOpacity
-              style={[styles.sheetButton, styles.sheetButtonSecondary]}
-              onPress={() => selectPoint(null)}
-            >
-              <Text style={styles.sheetButtonSecondaryText}>Fechar</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.sheetButton, styles.sheetButtonPrimary]}
-              onPress={() => void handleOpenDirections()}
-            >
-              <Ionicons name="navigate" size={18} color={colors.textLight} />
-              <Text style={styles.sheetButtonPrimaryText}>Como chegar</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
-    </View>
+      {error ? <Text style={styles.errorText}>{error}</Text> : null}
+    </ScrollView>
   );
 };
 
@@ -284,277 +393,281 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
-  map: {
-    flex: 1,
+  content: {
     width: "100%",
+    maxWidth: 1180,
+    alignSelf: "center",
+    paddingHorizontal: 20,
+    paddingTop: 24,
+    paddingBottom: 36,
+    gap: 18,
   },
-  topOverlay: {
+  hero: {
+    backgroundColor: colors.primaryStrong,
+    borderRadius: 30,
+    padding: 24,
+    overflow: "hidden",
+  },
+  heroLeaf: {
     position: "absolute",
-    top: 18,
-    left: 16,
-    right: 16,
+    right: -20,
+    top: -10,
+    width: 240,
+    height: 240,
+    opacity: 0.36,
   },
-  routeSummaryOverlay: {
-    position: "absolute",
-    top: 192,
-    left: 16,
-    right: 16,
+  heroTitle: {
+    color: colors.textLight,
+    fontSize: 34,
+    lineHeight: 40,
+    fontWeight: "800",
+    maxWidth: 300,
   },
-  topCard: {
-    backgroundColor: colors.surface,
-    borderRadius: 24,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: colors.border,
+  heroDescription: {
+    color: "rgba(255,255,255,0.9)",
+    fontSize: 16,
+    lineHeight: 24,
+    marginTop: 14,
+    maxWidth: 420,
   },
-  topCardHeader: {
+  heroMetaRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+    marginTop: 18,
+  },
+  heroPill: {
+    alignSelf: "flex-start",
+    backgroundColor: "rgba(255,255,255,0.16)",
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+  },
+  heroPillMuted: {
+    alignSelf: "flex-start",
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
+    gap: 8,
+    backgroundColor: "rgba(255,255,255,0.12)",
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
   },
-  topCardTitleWrap: {
-    flex: 1,
-    paddingRight: 12,
+  heroPillText: {
+    color: colors.textLight,
+    fontSize: 13,
+    fontWeight: "700",
   },
-  topEyebrow: {
+  loadingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  loadingText: {
     color: colors.textMuted,
-    fontSize: 12,
-    fontWeight: "800",
-    letterSpacing: 1,
-    textTransform: "uppercase",
+    fontSize: 14,
   },
-  topTitle: {
-    color: colors.text,
-    fontSize: 22,
-    fontWeight: "800",
-    marginTop: 4,
+  insightRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 14,
   },
-  refreshButton: {
+  insightCard: {
+    flexGrow: 1,
+    minWidth: 220,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 12,
+  },
+  insightIcon: {
     width: 44,
     height: 44,
     borderRadius: 16,
+    backgroundColor: colors.primarySoft,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: colors.primary,
   },
-  metricsRow: {
-    flexDirection: "row",
-    gap: 10,
-    marginTop: 14,
+  insightBody: {
+    flex: 1,
   },
-  metricPill: {
-    backgroundColor: colors.surfaceMuted,
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  metricPillValue: {
-    color: colors.text,
-    fontSize: 14,
-    fontWeight: "800",
-  },
-  metricPillLabel: {
+  insightLabel: {
     color: colors.textMuted,
-    fontSize: 11,
-    marginTop: 2,
-  },
-  inlineHint: {
-    color: colors.textMuted,
-    fontSize: 13,
-    marginTop: 12,
-  },
-  warningText: {
-    color: colors.text,
     fontSize: 12,
-    marginTop: 10,
-  },
-  errorText: {
-    color: colors.error,
-    fontSize: 12,
-    marginTop: 10,
-  },
-  routeSummaryCard: {
-    backgroundColor: "rgba(255, 253, 248, 0.96)",
-    borderRadius: 20,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  routeSummaryEyebrow: {
-    color: colors.textMuted,
-    fontSize: 11,
     fontWeight: "800",
-    letterSpacing: 1,
     textTransform: "uppercase",
+    letterSpacing: 0.8,
   },
-  routeSummaryTitle: {
+  insightValue: {
     color: colors.text,
     fontSize: 18,
     fontWeight: "800",
-    marginTop: 4,
+    marginTop: 6,
   },
-  routeSummaryText: {
+  insightHelper: {
     color: colors.textMuted,
-    fontSize: 12,
-    marginTop: 4,
+    fontSize: 13,
+    lineHeight: 20,
+    marginTop: 6,
   },
-  bottomList: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 16,
-    maxHeight: 150,
+  routeCard: {
+    gap: 18,
   },
-  bottomListContent: {
-    paddingHorizontal: 16,
-    paddingVertical: 4,
+  cardHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     gap: 12,
+    flexWrap: "wrap",
   },
-  pointCard: {
-    width: 220,
-    backgroundColor: colors.surface,
-    borderRadius: 20,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  pointCardFeatured: {
-    backgroundColor: colors.primaryStrong,
-    borderColor: colors.primaryStrong,
-  },
-  pointCardIndex: {
-    color: colors.textMuted,
-    fontSize: 11,
+  cardTitle: {
+    color: colors.text,
+    fontSize: 18,
     fontWeight: "800",
-    letterSpacing: 1,
   },
-  pointCardTitle: {
+  cardCaption: {
+    color: colors.textMuted,
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  cardBadge: {
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  cardBadgeText: {
+    color: colors.primaryStrong,
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  mapWrap: {
+    borderRadius: 24,
+    overflow: "hidden",
+  },
+  map: {
+    width: "100%",
+    height: "100%",
+  },
+  mapHelper: {
+    color: colors.textMuted,
+    fontSize: 14,
+    lineHeight: 22,
+  },
+  markerBubble: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: colors.primary,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 3,
+    borderColor: colors.textLight,
+  },
+  markerText: {
+    color: colors.textLight,
+    fontSize: 16,
+    fontWeight: "800",
+  },
+  pointsCard: {
+    gap: 16,
+  },
+  pointsList: {
+    gap: 0,
+  },
+  pointRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 12,
+    paddingVertical: 12,
+  },
+  pointIndexColumn: {
+    alignItems: "center",
+  },
+  pointIndexBubble: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: colors.primary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  pointIndexText: {
+    color: colors.textLight,
+    fontSize: 18,
+    fontWeight: "800",
+  },
+  pointLine: {
+    width: 2,
+    flex: 1,
+    minHeight: 24,
+    backgroundColor: "#C7DEC9",
+    marginTop: 6,
+  },
+  pointBody: {
+    flex: 1,
+    paddingTop: 4,
+  },
+  pointTitle: {
     color: colors.text,
     fontSize: 16,
     fontWeight: "800",
-    marginTop: 8,
   },
-  pointCardText: {
-    color: colors.textMuted,
-    fontSize: 13,
-    lineHeight: 18,
-    marginTop: 6,
-  },
-  emptySheet: {
-    position: "absolute",
-    left: 16,
-    right: 16,
-    bottom: 18,
-    backgroundColor: colors.surface,
-    borderRadius: 22,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  emptyTitle: {
-    color: colors.text,
-    fontSize: 18,
-    fontWeight: "800",
-  },
-  emptyText: {
+  pointSubtitle: {
     color: colors.textMuted,
     fontSize: 14,
-    lineHeight: 21,
-    marginTop: 6,
+    marginTop: 4,
+    lineHeight: 20,
   },
-  detailSheet: {
-    position: "absolute",
-    left: 16,
-    right: 16,
-    bottom: 18,
-    backgroundColor: colors.surface,
-    borderRadius: 26,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  detailHandle: {
-    width: 42,
-    height: 5,
-    borderRadius: 999,
-    backgroundColor: colors.border,
-    alignSelf: "center",
-    marginBottom: 14,
-  },
-  detailTitle: {
-    color: colors.text,
-    fontSize: 20,
-    fontWeight: "800",
-  },
-  detailText: {
-    color: colors.textMuted,
-    fontSize: 14,
-    lineHeight: 21,
-    marginTop: 6,
-  },
-  detailCoordinates: {
-    color: colors.textMuted,
-    fontSize: 12,
-    marginTop: 8,
-  },
-  detailTags: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    marginTop: 12,
-  },
-  tag: {
-    backgroundColor: colors.surfaceMuted,
+  pointBadge: {
+    alignSelf: "flex-start",
+    marginTop: 10,
+    backgroundColor: colors.primarySoft,
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 6,
-    borderWidth: 1,
-    borderColor: colors.border,
   },
-  tagText: {
-    color: colors.textMuted,
+  pointBadgeText: {
+    color: colors.primaryStrong,
     fontSize: 11,
-    fontWeight: "700",
+    fontWeight: "800",
   },
-  futureHint: {
-    color: colors.text,
-    fontSize: 13,
-    lineHeight: 20,
-    marginTop: 14,
+  pointAction: {
+    paddingTop: 6,
   },
-  actionsRow: {
+  startButton: {
+    marginTop: 4,
+  },
+  helperCard: {
     flexDirection: "row",
-    gap: 12,
-    marginTop: 16,
+    alignItems: "center",
+    gap: 14,
   },
-  sheetButton: {
-    flex: 1,
-    minHeight: 54,
-    borderRadius: 18,
+  helperIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: "#EAF4E5",
     alignItems: "center",
     justifyContent: "center",
-    flexDirection: "row",
-    gap: 8,
   },
-  sheetButtonSecondary: {
-    backgroundColor: colors.surfaceMuted,
-    borderWidth: 1,
-    borderColor: colors.border,
+  helperBody: {
+    flex: 1,
   },
-  sheetButtonPrimary: {
-    backgroundColor: colors.primary,
-  },
-  sheetButtonSecondaryText: {
+  helperTitle: {
     color: colors.text,
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: "800",
   },
-  sheetButtonPrimaryText: {
-    color: colors.textLight,
-    fontSize: 15,
-    fontWeight: "800",
+  helperText: {
+    color: colors.textMuted,
+    fontSize: 14,
+    lineHeight: 22,
+    marginTop: 6,
+  },
+  errorText: {
+    color: colors.error,
+    fontSize: 13,
+    lineHeight: 20,
   },
 });
 
