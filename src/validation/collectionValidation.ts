@@ -8,6 +8,7 @@ const VALID_MATERIALS = new Set([
   "vidro",
   "outros",
 ]);
+const VALID_WEIGHT_RANGES = new Set(["small", "medium", "large"]);
 
 export function validateCollection(input: CollectionInput): void {
   const errors: Record<string, string> = {};
@@ -16,8 +17,18 @@ export function validateCollection(input: CollectionInput): void {
     errors.material = "material invalido";
   }
 
+  if (!VALID_WEIGHT_RANGES.has(input.weightRange)) {
+    errors.weightRange = "faixa de peso invalida";
+  }
+
   if (!(input.weightKg > 0) || input.weightKg > 1000) {
     errors.weightKg = "weightKg deve ser > 0 e <= 1000";
+  }
+
+  if (!input.collectedAt) {
+    errors.collectedAt = "collectedAt obrigatorio";
+  } else if (Number.isNaN(Date.parse(input.collectedAt))) {
+    errors.collectedAt = "collectedAt deve ser ISO-8601 valido";
   }
 
   if (!input.createdAt) {
@@ -38,6 +49,10 @@ export function validateCollection(input: CollectionInput): void {
     (input.longitude < -180 || input.longitude > 180)
   ) {
     errors.longitude = "longitude deve estar entre -180 e 180";
+  }
+
+  if (input.locationAccuracy != null && input.locationAccuracy < 0) {
+    errors.locationAccuracy = "locationAccuracy deve ser >= 0";
   }
 
   if (Object.keys(errors).length > 0) {

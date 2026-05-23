@@ -15,11 +15,11 @@
     "lib": ["ES2022"],
     "types": ["react"],
     "typeRoots": ["./src/types", "./node_modules/@types"],
-    "baseUrl": ".",
+    "baseUrl": "./",
     "paths": {
       "@/*": ["src/*"]
     }
   },
-  "include": ["App.tsx", "App.js", "index.js", "src"],
+  "include": ["App.tsx", "src", "nativewind-env.d.ts"],
   "exclude": ["node_modules"]
 }

@@ -1,7 +1,7 @@
-# Backend Inicial - RecolheTudo
+# Backend - RecolheTudo
 
-Data: 13-05-2026
-Status: backend inicial persistente para coletas e analytics
+Data: 20-05-2026  
+Status: backend incremental para sync, analytics, rotas e pontos de coleta
 
 ## Objetivo
 
@@ -17,13 +17,23 @@ O app continua offline-first com SQLite local como fonte operacional imediata.
 ## Endpoints
 
 - `GET /health`
-- `POST /v1/collections/sync`
-- `GET /v1/collections`
-- `DELETE /v1/collections/:remoteId`
+- `GET /ready`
+- `POST /v1/sync`
 - `GET /v1/collection-points/nearby`
 - `POST /v1/routes/plan`
 - `GET /v1/analytics/daily-summary`
 - `GET /v1/analytics/weekly-summary`
+- `GET /v1/analytics/summary`
+- `GET /v1/analytics/materials`
+- `GET /v1/analytics/productivity`
+
+## Endpoints legados despublicados
+
+- `POST /v1/collections/sync`
+- `GET /v1/collections`
+- `DELETE /v1/collections/:remoteId`
+
+Esses endpoints hoje respondem como legados/indisponiveis para evitar uso inseguro sem autenticacao.
 
 ## Estado atual
 
@@ -31,6 +41,8 @@ Implementacao atual:
 
 - servidor HTTP Node
 - PostgreSQL para `collections` e `route_runs`
+- request id e logs basicos
+- readiness real do PostgreSQL
 - roteirizacao via OSRM com fallback simples
 - pontos de coleta seedados para permitir teste rapido
 - `docker-compose.yml` sobe frontend web, backend e PostgreSQL juntos
@@ -42,10 +54,11 @@ O cliente usa `EXPO_PUBLIC_API_BASE_URL` para decidir quando ativar a camada cen
 Hoje o app usa o backend primeiro para:
 
 - `GET /health` no painel de inspecao
+- `GET /ready` para readiness real do PostgreSQL
 - `GET /v1/collection-points/nearby` para carregar pontos
 - `POST /v1/routes/plan` para ordenacao e ETA
-- `POST /v1/collections/sync` para sincronizacao inicial best-effort de coletas
-- `DELETE /v1/collections/:remoteId` para exclusao remota best-effort
+- `POST /v1/sync` para sincronizacao incremental de coletas criadas, atualizadas e excluidas
+- `GET /v1/analytics/summary` para resumo centralizado diario/semanal
 
 Se a API nao estiver disponivel, o app mantem o comportamento local.
 
@@ -95,8 +108,14 @@ Fluxo atual:
 
 - criar coleta salva no SQLite com `sync_status = pending_sync`
 - a coleta entra em `sync_queue`
-- quando houver backend configurado, a fila e drenada em modo best-effort
-- exclusao local remove a coleta e enfileira `delete` remoto quando `remote_id` existir
+- quando houver backend configurado, a fila e drenada em modo best-effort via `POST /v1/sync`
+- exclusao local remove a coleta e envia tombstone no proximo sync quando `remote_id` existir
+
+## Contrato formal de sync
+
+Documento formal:
+
+- `docs/SYNC.md`
 
 ## Higiene de seguranca
 
@@ -111,7 +130,6 @@ Antes de publicar no GitHub:
 
 Para sair do bootstrap e virar backend de producao, a ordem correta e:
 
-1. criar tabela de `devices` e fila de `sync_events`
-2. mover analytics do cliente para a API
-3. adicionar reconciliacao completa de conflitos e retries com backoff
-4. colocar autenticacao e observabilidade
+1. consolidar `materials` e `productivity` no cliente quando fizer sentido
+2. evoluir reconciliacao completa de conflitos e retries com backoff
+3. colocar autenticacao real e observabilidade mais forte
