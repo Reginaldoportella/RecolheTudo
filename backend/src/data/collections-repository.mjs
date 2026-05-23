@@ -1,27 +1,29 @@
 import { query } from "./postgres.mjs";
 
+function toIsoString(value) {
+  return value instanceof Date ? value.toISOString() : value;
+}
+
 function mapRow(row) {
   return {
     remoteId: row.remote_id,
     localId: row.local_id,
+    userId: row.user_id,
+    deviceId: row.device_id,
     material: row.material,
     weightKg: Number(row.weight_kg),
-    collectedAt: row.collected_at instanceof Date
-      ? row.collected_at.toISOString()
-      : row.collected_at,
-    createdAt: row.created_at instanceof Date
-      ? row.created_at.toISOString()
-      : row.created_at,
+    collectedAt: toIsoString(row.collected_at),
+    createdAt: toIsoString(row.created_at),
     latitude: row.latitude,
     longitude: row.longitude,
     locationAccuracy: row.location_accuracy,
     notes: row.notes,
-    updatedAt: row.updated_at instanceof Date
-      ? row.updated_at.toISOString()
-      : row.updated_at,
-    deletedAt: row.deleted_at instanceof Date
-      ? row.deleted_at.toISOString()
-      : row.deleted_at,
+    updatedAt: toIsoString(row.updated_at),
+    deletedAt: toIsoString(row.deleted_at),
+    syncedAt: toIsoString(row.synced_at),
+    serverUpdatedAt: toIsoString(row.server_updated_at),
+    syncVersion: Number(row.sync_version ?? 1),
+    syncMetadata: row.sync_metadata ?? {},
   };
 }
 
@@ -35,6 +37,8 @@ export async function upsertCollections(incomingCollections) {
         INSERT INTO collections (
           remote_id,
           local_id,
+          user_id,
+          device_id,
           material,
           weight_kg,
           collected_at,
@@ -44,12 +48,18 @@ export async function upsertCollections(incomingCollections) {
           location_accuracy,
           notes,
           updated_at,
-          deleted_at
+          deleted_at,
+          synced_at,
+          sync_version,
+          server_updated_at,
+          sync_metadata
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NULL)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), 1, NOW(), $15::jsonb)
         ON CONFLICT (remote_id)
         DO UPDATE SET
           local_id = EXCLUDED.local_id,
+          user_id = COALESCE(EXCLUDED.user_id, collections.user_id),
+          device_id = COALESCE(EXCLUDED.device_id, collections.device_id),
           material = EXCLUDED.material,
           weight_kg = EXCLUDED.weight_kg,
           collected_at = EXCLUDED.collected_at,
@@ -58,11 +68,17 @@ export async function upsertCollections(incomingCollections) {
           longitude = EXCLUDED.longitude,
           location_accuracy = EXCLUDED.location_accuracy,
           notes = EXCLUDED.notes,
-          updated_at = NOW(),
-          deleted_at = NULL
+          updated_at = EXCLUDED.updated_at,
+          deleted_at = EXCLUDED.deleted_at,
+          synced_at = NOW(),
+          sync_version = collections.sync_version + 1,
+          server_updated_at = NOW(),
+          sync_metadata = EXCLUDED.sync_metadata
         RETURNING
           remote_id,
           local_id,
+          user_id,
+          device_id,
           material,
           weight_kg,
           collected_at,
@@ -72,11 +88,17 @@ export async function upsertCollections(incomingCollections) {
           location_accuracy,
           notes,
           updated_at,
-          deleted_at;
+          deleted_at,
+          synced_at,
+          sync_version,
+          server_updated_at,
+          sync_metadata;
       `,
       [
         remoteId,
-        item.localId ?? null,
+        item.localId != null ? String(item.localId) : null,
+        item.userId ?? null,
+        item.deviceId ?? null,
         item.material,
         item.weightKg,
         item.collectedAt,
@@ -85,6 +107,9 @@ export async function upsertCollections(incomingCollections) {
         item.longitude ?? null,
         item.locationAccuracy ?? null,
         item.notes ?? null,
+        item.updatedAt ?? item.createdAt ?? item.collectedAt,
+        item.deletedAt ?? null,
+        JSON.stringify(item.syncMetadata ?? {}),
       ],
     );
 
@@ -100,6 +125,8 @@ export async function listCollections(limit = 50) {
       SELECT
         remote_id,
         local_id,
+        user_id,
+        device_id,
         material,
         weight_kg,
         collected_at,
@@ -109,7 +136,11 @@ export async function listCollections(limit = 50) {
         location_accuracy,
         notes,
         updated_at,
-        deleted_at
+        deleted_at,
+        synced_at,
+        sync_version,
+        server_updated_at,
+        sync_metadata
       FROM collections
       WHERE deleted_at IS NULL
       ORDER BY collected_at DESC, created_at DESC
@@ -123,11 +154,137 @@ export async function listCollections(limit = 50) {
 
 export async function deleteCollection(remoteId) {
   const result = await query(
-    "DELETE FROM collections WHERE remote_id = $1;",
+    `
+      UPDATE collections
+      SET
+        deleted_at = COALESCE(deleted_at, NOW()),
+        updated_at = NOW(),
+        synced_at = NOW(),
+        sync_version = sync_version + 1,
+        server_updated_at = NOW()
+      WHERE remote_id = $1
+      RETURNING remote_id;
+    `,
     [remoteId],
   );
 
   return (result.rowCount ?? 0) > 0;
+}
+
+export async function softDeleteCollections(incomingCollections) {
+  const accepted = [];
+
+  for (const item of incomingCollections) {
+    const referenceId = item.remoteId ?? null;
+
+    if (!referenceId) {
+      accepted.push({
+        remoteId: null,
+        localId: item.localId ?? null,
+        deletedAt: item.deletedAt ?? new Date().toISOString(),
+        skipped: true,
+      });
+      continue;
+    }
+
+    const result = await query(
+      `
+        UPDATE collections
+        SET
+          deleted_at = COALESCE($2, NOW()),
+          updated_at = COALESCE($3, NOW()),
+          synced_at = NOW(),
+          sync_version = sync_version + 1,
+          server_updated_at = NOW()
+        WHERE remote_id = $1
+        RETURNING
+          remote_id,
+          local_id,
+          user_id,
+          device_id,
+          material,
+          weight_kg,
+          collected_at,
+          created_at,
+          latitude,
+          longitude,
+          location_accuracy,
+          notes,
+          updated_at,
+          deleted_at,
+          synced_at,
+          sync_version,
+          server_updated_at,
+          sync_metadata;
+      `,
+      [referenceId, item.deletedAt ?? null, item.updatedAt ?? null],
+    );
+
+    accepted.push(
+      result.rows[0]
+        ? mapRow(result.rows[0])
+        : {
+          remoteId: referenceId,
+          localId: item.localId ?? null,
+          deletedAt: item.deletedAt ?? new Date().toISOString(),
+          skipped: true,
+        },
+    );
+  }
+
+  return accepted;
+}
+
+export async function listCollectionChangesSince(lastPulledAt, limit = 500) {
+  const cursor = lastPulledAt ?? "1970-01-01T00:00:00.000Z";
+  const result = await query(
+    `
+      SELECT
+        remote_id,
+        local_id,
+        user_id,
+        device_id,
+        material,
+        weight_kg,
+        collected_at,
+        created_at,
+        latitude,
+        longitude,
+        location_accuracy,
+        notes,
+        updated_at,
+        deleted_at,
+        synced_at,
+        sync_version,
+        server_updated_at,
+        sync_metadata
+      FROM collections
+      WHERE server_updated_at > $1::timestamptz
+      ORDER BY server_updated_at ASC
+      LIMIT $2;
+    `,
+    [cursor, limit],
+  );
+
+  const created = [];
+  const updated = [];
+  const deleted = [];
+
+  for (const row of result.rows) {
+    const mapped = mapRow(row);
+    const createdAtMs = Date.parse(mapped.createdAt);
+    const cursorMs = Date.parse(cursor);
+
+    if (mapped.deletedAt) {
+      deleted.push(mapped);
+    } else if (createdAtMs > cursorMs) {
+      created.push(mapped);
+    } else {
+      updated.push(mapped);
+    }
+  }
+
+  return { created, updated, deleted };
 }
 
 function emptyByMaterial() {
@@ -137,6 +294,20 @@ function emptyByMaterial() {
     metal: 0,
     vidro: 0,
     outros: 0,
+  };
+}
+
+function getDateRange(referenceDate, period) {
+  const end = new Date(`${referenceDate}T00:00:00.000Z`);
+  const start = new Date(end);
+
+  if (period === "weekly") {
+    start.setUTCDate(start.getUTCDate() - 6);
+  }
+
+  return {
+    startDate: start.toISOString().slice(0, 10),
+    endDate: end.toISOString().slice(0, 10),
   };
 }
 
@@ -168,6 +339,76 @@ export async function getDailySummary(date) {
     totalKg,
     byMaterial,
     collectionsCount,
+  };
+}
+
+export async function getMaterialsSummary(referenceDate, period = "daily") {
+  const { startDate, endDate } = getDateRange(referenceDate, period);
+  const result = await query(
+    `
+      SELECT material, SUM(weight_kg) AS total_kg, COUNT(*)::int AS collections_count
+      FROM collections
+      WHERE deleted_at IS NULL
+        AND collected_at::date BETWEEN $1::date AND $2::date
+      GROUP BY material
+      ORDER BY total_kg DESC, collections_count DESC;
+    `,
+    [startDate, endDate],
+  );
+
+  const items = result.rows.map((row) => ({
+    material: row.material,
+    totalKg: Number(row.total_kg ?? 0),
+    collectionsCount: Number(row.collections_count ?? 0),
+  }));
+
+  return {
+    period,
+    startDate,
+    endDate,
+    items,
+  };
+}
+
+export async function getProductivitySummary(referenceDate, period = "daily") {
+  if (period === "daily") {
+    const summary = await getDailySummary(referenceDate);
+    return {
+      period,
+      startDate: referenceDate,
+      endDate: referenceDate,
+      points: [
+        {
+          date: referenceDate,
+          totalKg: summary.totalKg,
+          collectionsCount: summary.collectionsCount,
+        },
+      ],
+    };
+  }
+
+  const { startDate, endDate } = getDateRange(referenceDate, "weekly");
+  const points = [];
+
+  const cursor = new Date(`${startDate}T00:00:00.000Z`);
+  const end = new Date(`${endDate}T00:00:00.000Z`);
+
+  while (cursor <= end) {
+    const date = cursor.toISOString().slice(0, 10);
+    const summary = await getDailySummary(date);
+    points.push({
+      date,
+      totalKg: summary.totalKg,
+      collectionsCount: summary.collectionsCount,
+    });
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+
+  return {
+    period,
+    startDate,
+    endDate,
+    points,
   };
 }
 

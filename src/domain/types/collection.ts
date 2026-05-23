@@ -52,3 +52,29 @@ export interface WeeklySummary {
   collectionsCount: number;
   dailySummaries: DailySummary[];
 }
+
+export interface MaterialSummaryItem {
+  material: Material;
+  totalKg: number;
+  collectionsCount: number;
+}
+
+export interface MaterialsSummary {
+  period: "daily" | "weekly";
+  startDate: string;
+  endDate: string;
+  items: MaterialSummaryItem[];
+}
+
+export interface ProductivityPoint {
+  date: string;
+  totalKg: number;
+  collectionsCount: number;
+}
+
+export interface ProductivitySummary {
+  period: "daily" | "weekly";
+  startDate: string;
+  endDate: string;
+  points: ProductivityPoint[];
+}

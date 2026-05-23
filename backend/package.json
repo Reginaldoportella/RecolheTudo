@@ -9,6 +9,7 @@
   "scripts": {
     "start": "node src/server.mjs",
     "dev": "node --watch src/server.mjs",
-    "check": "node --check src/server.mjs"
+    "check": "node --check src/server.mjs",
+    "test": "node --test"
   }
 }

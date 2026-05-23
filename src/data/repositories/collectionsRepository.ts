@@ -96,11 +96,14 @@ export interface CollectionsRepository {
   enqueueDeleteSync(remoteId: string, entityId?: number | null): Promise<void>;
   deleteQueuedUpsertsByCollectionId(id: number): Promise<void>;
   getPendingSyncQueue(limit: number): Promise<CollectionSyncQueueEntry[]>;
+  getLastSyncedAt(): Promise<string | null>;
   markCollectionAsSynced(id: number, remoteId: string, syncedAt: string): Promise<void>;
   markCollectionSyncError(id: number): Promise<void>;
   markSyncQueueFailure(queueId: number, message: string): Promise<void>;
   deleteSyncQueueEntry(queueId: number): Promise<void>;
   getPendingSyncCount(): Promise<number>;
+  upsertCollectionFromRemote(payload: BackendCollectionPayload, syncedAt: string): Promise<void>;
+  deleteByRemoteId(remoteId: string): Promise<void>;
 }
 
 export const collectionsRepository: CollectionsRepository = {
@@ -381,6 +384,18 @@ export const collectionsRepository: CollectionsRepository = {
     }));
   },
 
+  async getLastSyncedAt() {
+    const db = await getDatabase();
+    const row = await db.getFirstAsync<{ last_synced_at: string | null }>(
+      `
+        SELECT MAX(last_synced_at) AS last_synced_at
+        FROM collections;
+      `,
+    );
+
+    return row?.last_synced_at ?? null;
+  },
+
   async markCollectionAsSynced(id, remoteId, syncedAt) {
     const db = await getDatabase();
     await db.runAsync(
@@ -431,5 +446,85 @@ export const collectionsRepository: CollectionsRepository = {
     );
 
     return Number(row?.count ?? 0);
+  },
+
+  async upsertCollectionFromRemote(payload, syncedAt) {
+    const db = await getDatabase();
+    const remoteId = payload.remoteId;
+
+    if (!remoteId) {
+      return;
+    }
+
+    const existing = await db.getFirstAsync<{ id: number | null }>(
+      "SELECT id FROM collections WHERE remote_id = ?;",
+      remoteId,
+    );
+
+    if (existing?.id != null) {
+      await db.runAsync(
+        `
+          UPDATE collections
+          SET material = ?, weight_range = COALESCE(weight_range, 'medium'),
+              weight_kg = ?, estimated_weight_kg = ?,
+              latitude = ?, longitude = ?, location_accuracy = ?,
+              collected_at = ?, created_at = ?, notes = ?,
+              sync_status = ?, last_synced_at = ?
+          WHERE id = ?;
+        `,
+        payload.material,
+        payload.weightKg,
+        payload.weightKg,
+        payload.latitude ?? null,
+        payload.longitude ?? null,
+        payload.locationAccuracy ?? null,
+        payload.collectedAt,
+        payload.createdAt,
+        payload.notes ?? null,
+        "synced",
+        syncedAt,
+        existing.id,
+      );
+      return;
+    }
+
+    await db.runAsync(
+      `
+        INSERT INTO collections (
+          material,
+          weight_range,
+          weight_kg,
+          estimated_weight_kg,
+          latitude,
+          longitude,
+          location_accuracy,
+          collected_at,
+          created_at,
+          notes,
+          remote_id,
+          sync_status,
+          last_synced_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+      `,
+      payload.material,
+      "medium",
+      payload.weightKg,
+      payload.weightKg,
+      payload.latitude ?? null,
+      payload.longitude ?? null,
+      payload.locationAccuracy ?? null,
+      payload.collectedAt,
+      payload.createdAt,
+      payload.notes ?? null,
+      remoteId,
+      "synced",
+      syncedAt,
+    );
+  },
+
+  async deleteByRemoteId(remoteId) {
+    const db = await getDatabase();
+    await db.runAsync("DELETE FROM collections WHERE remote_id = ?;", remoteId);
   },
 };

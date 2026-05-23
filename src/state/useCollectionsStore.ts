@@ -4,6 +4,7 @@ import type {
   Collection,
   CollectionInput,
   DailySummary,
+  MaterialsSummary,
   WeeklySummary,
 } from "../domain/types/collection";
 import { collectionsService } from "../services/collectionsService";
@@ -24,6 +25,8 @@ interface RegisterResult {
 interface CollectionsStoreState {
   dailySummaryByDate: Record<string, DailySummary>;
   weeklySummaryByDate: Record<string, WeeklySummary>;
+  materialsSummaryByDate: Record<string, MaterialsSummary>;
+  weeklyMaterialsSummaryByDate: Record<string, MaterialsSummary>;
   history: Collection[];
   homeStatus: UIStatus;
   collectionStatus: UIStatus;
@@ -55,6 +58,8 @@ function runBestEffortSync(task: Promise<unknown>): void {
 export const useCollectionsStore = create<CollectionsStoreState>((set, get) => ({
   dailySummaryByDate: {},
   weeklySummaryByDate: {},
+  materialsSummaryByDate: {},
+  weeklyMaterialsSummaryByDate: {},
   history: [],
   homeStatus: "idle",
   collectionStatus: "idle",
@@ -68,8 +73,15 @@ export const useCollectionsStore = create<CollectionsStoreState>((set, get) => (
   async loadDashboard(date) {
     const cachedSummary = get().dailySummaryByDate[date];
     const cachedWeeklySummary = get().weeklySummaryByDate[date];
+    const cachedMaterialsSummary = get().materialsSummaryByDate[date];
+    const cachedWeeklyMaterialsSummary = get().weeklyMaterialsSummaryByDate[date];
 
-    if (cachedSummary && cachedWeeklySummary) {
+    if (
+      cachedSummary &&
+      cachedWeeklySummary &&
+      cachedMaterialsSummary &&
+      cachedWeeklyMaterialsSummary
+    ) {
       set({
         homeStatus: cachedSummary.collectionsCount === 0 ? "empty" : "success",
       });
@@ -79,9 +91,12 @@ export const useCollectionsStore = create<CollectionsStoreState>((set, get) => (
     set({ homeStatus: "loading", errorMessage: null });
 
     try {
-      const [summary, weeklySummary] = await Promise.all([
+      const [summary, weeklySummary, materialsSummary, weeklyMaterialsSummary] =
+        await Promise.all([
         collectionsService.getDailySummary(date),
         collectionsService.getWeeklySummary(date),
+        collectionsService.getMaterialsSummary("daily", date),
+        collectionsService.getMaterialsSummary("weekly", date),
       ]);
 
       set((state) => ({
@@ -92,6 +107,14 @@ export const useCollectionsStore = create<CollectionsStoreState>((set, get) => (
         weeklySummaryByDate: {
           ...state.weeklySummaryByDate,
           [date]: weeklySummary,
+        },
+        materialsSummaryByDate: {
+          ...state.materialsSummaryByDate,
+          [date]: materialsSummary,
+        },
+        weeklyMaterialsSummaryByDate: {
+          ...state.weeklyMaterialsSummaryByDate,
+          [date]: weeklyMaterialsSummary,
         },
         homeStatus: summary.collectionsCount === 0 ? "empty" : "success",
       }));
@@ -207,12 +230,20 @@ export const useCollectionsStore = create<CollectionsStoreState>((set, get) => (
     set((state) => {
       const nextSummaryByDate = { ...state.dailySummaryByDate };
       const nextWeeklySummaryByDate = { ...state.weeklySummaryByDate };
+      const nextMaterialsSummaryByDate = { ...state.materialsSummaryByDate };
+      const nextWeeklyMaterialsSummaryByDate = {
+        ...state.weeklyMaterialsSummaryByDate,
+      };
       delete nextSummaryByDate[date];
       delete nextWeeklySummaryByDate[date];
+      delete nextMaterialsSummaryByDate[date];
+      delete nextWeeklyMaterialsSummaryByDate[date];
 
       return {
         dailySummaryByDate: nextSummaryByDate,
         weeklySummaryByDate: nextWeeklySummaryByDate,
+        materialsSummaryByDate: nextMaterialsSummaryByDate,
+        weeklyMaterialsSummaryByDate: nextWeeklyMaterialsSummaryByDate,
       };
     });
   },

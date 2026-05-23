@@ -3,6 +3,7 @@ import {
   listCollections,
   upsertCollections,
 } from "../data/collections-repository.mjs";
+import { syncEntities } from "./sync-service.mjs";
 
 export async function syncCollections(payload) {
   const collections = Array.isArray(payload?.collections) ? payload.collections : [];
@@ -13,6 +14,10 @@ export async function syncCollections(payload) {
     syncCursor: new Date().toISOString(),
     receivedCount: collections.length,
   };
+}
+
+export async function syncCollectionsV2(payload) {
+  return syncEntities(payload);
 }
 
 export async function getCollections(limit = 50) {

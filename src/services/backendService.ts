@@ -1,5 +1,12 @@
 import { apiConfig, buildApiUrl } from "../config/api";
-import type { Collection, CollectionInput } from "../domain/types/collection";
+import type {
+  Collection,
+  CollectionInput,
+  DailySummary,
+  MaterialsSummary,
+  ProductivitySummary,
+  WeeklySummary,
+} from "../domain/types/collection";
 import type { CollectionPoint } from "../domain/types/collectionPoint";
 import type { PlannedRoute, RoutePlanningRequest } from "../domain/types/route";
 
@@ -15,22 +22,78 @@ export interface BackendHealthSnapshot {
 }
 
 export interface BackendCollectionPayload {
-  localId: number;
-  remoteId: string;
+  localId: number | string;
+  remoteId: string | null;
+  userId?: string | null;
+  deviceId?: string | null;
   material: Collection["material"];
   weightKg: number;
   collectedAt: string;
   createdAt: string;
+  updatedAt?: string;
+  deletedAt?: string | null;
   latitude: number | null;
   longitude: number | null;
   locationAccuracy: number | null;
   notes: string | null;
+  syncMetadata?: Record<string, unknown>;
 }
 
-export interface BackendSyncCollectionsResponse {
-  acceptedCollections: BackendCollectionPayload[];
-  syncCursor: string;
-  receivedCount: number;
+export interface BackendSyncRequest {
+  deviceId: string;
+  userId: string | null;
+  lastPulledAt: string | null;
+  changes: {
+    collections: {
+      created: BackendCollectionPayload[];
+      updated: BackendCollectionPayload[];
+      deleted: Array<
+        Pick<
+          BackendCollectionPayload,
+          "localId" | "remoteId" | "userId" | "deviceId" | "updatedAt" | "deletedAt"
+        >
+      >;
+    };
+  };
+}
+
+export interface BackendSyncRejectedItem {
+  code: string;
+  message: string;
+}
+
+export interface BackendSyncResponse {
+  requestDeviceId: string;
+  syncAt: string;
+  accepted: {
+    collections: {
+      created: BackendCollectionPayload[];
+      updated: BackendCollectionPayload[];
+      deleted: Array<BackendCollectionPayload & { skipped?: boolean }>;
+    };
+  };
+  rejected: {
+    collections: {
+      created: BackendSyncRejectedItem[];
+      updated: BackendSyncRejectedItem[];
+      deleted: BackendSyncRejectedItem[];
+    };
+  };
+  conflicts: {
+    collections: unknown[];
+  };
+  pull: {
+    collections: {
+      created: BackendCollectionPayload[];
+      updated: BackendCollectionPayload[];
+      deleted: Array<
+        Partial<BackendCollectionPayload> & {
+          remoteId: string | null;
+          skipped?: boolean;
+        }
+      >;
+    };
+  };
 }
 
 function toRemoteCollectionId(localId: number): string {
@@ -48,10 +111,13 @@ export function buildBackendCollectionPayload(
     weightKg: collection.weightKg,
     collectedAt: collection.collectedAt,
     createdAt: collection.createdAt,
+    updatedAt: collection.createdAt,
+    deletedAt: null,
     latitude: collection.latitude ?? null,
     longitude: collection.longitude ?? null,
     locationAccuracy: collection.locationAccuracy ?? null,
     notes: collection.notes ?? null,
+    syncMetadata: {},
   };
 }
 
@@ -94,51 +160,85 @@ export const backendService = {
     return payload.points;
   },
 
-  async syncCollections(
-    collections: BackendCollectionPayload[],
-  ): Promise<BackendSyncCollectionsResponse | null> {
+  async getAnalyticsSummary(
+    period: "daily" | "weekly",
+    date: string,
+  ): Promise<DailySummary | WeeklySummary | null> {
     if (!apiConfig.hasBackend) {
       return null;
     }
 
-    const response = await fetch(buildApiUrl("/v1/collections/sync"), {
+    const response = await fetch(
+      buildApiUrl(`/v1/analytics/summary?period=${period}&date=${date}`),
+    );
+
+    if (!response.ok) {
+      throw new Error(`Backend analytics respondeu com HTTP ${response.status}`);
+    }
+
+    return (await response.json()) as DailySummary | WeeklySummary;
+  },
+
+  async getAnalyticsMaterials(
+    period: "daily" | "weekly",
+    date: string,
+  ): Promise<MaterialsSummary | null> {
+    if (!apiConfig.hasBackend) {
+      return null;
+    }
+
+    const response = await fetch(
+      buildApiUrl(`/v1/analytics/materials?period=${period}&date=${date}`),
+    );
+
+    if (!response.ok) {
+      throw new Error(
+        `Backend analytics materials respondeu com HTTP ${response.status}`,
+      );
+    }
+
+    return (await response.json()) as MaterialsSummary;
+  },
+
+  async getAnalyticsProductivity(
+    period: "daily" | "weekly",
+    date: string,
+  ): Promise<ProductivitySummary | null> {
+    if (!apiConfig.hasBackend) {
+      return null;
+    }
+
+    const response = await fetch(
+      buildApiUrl(`/v1/analytics/productivity?period=${period}&date=${date}`),
+    );
+
+    if (!response.ok) {
+      throw new Error(
+        `Backend analytics productivity respondeu com HTTP ${response.status}`,
+      );
+    }
+
+    return (await response.json()) as ProductivitySummary;
+  },
+
+  async syncEntities(payload: BackendSyncRequest): Promise<BackendSyncResponse | null> {
+    if (!apiConfig.hasBackend) {
+      return null;
+    }
+
+    const response = await fetch(buildApiUrl("/v1/sync"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ collections }),
+      body: JSON.stringify(payload),
     });
 
     if (!response.ok) {
-      throw new Error(`Backend collections respondeu com HTTP ${response.status}`);
+      throw new Error(`Backend sync respondeu com HTTP ${response.status}`);
     }
 
-    return (await response.json()) as BackendSyncCollectionsResponse;
-  },
-
-  async deleteCollection(localId: number): Promise<boolean | null> {
-    return backendService.deleteCollectionByRemoteId(toRemoteCollectionId(localId));
-  },
-
-  async deleteCollectionByRemoteId(remoteId: string): Promise<boolean | null> {
-    if (!apiConfig.hasBackend) {
-      return null;
-    }
-
-    const response = await fetch(buildApiUrl(`/v1/collections/${remoteId}`), {
-      method: "DELETE",
-    });
-
-    if (response.status === 404) {
-      return false;
-    }
-
-    if (!response.ok) {
-      throw new Error(`Backend delete respondeu com HTTP ${response.status}`);
-    }
-
-    const payload = (await response.json()) as { deleted: boolean };
-    return payload.deleted;
+    return (await response.json()) as BackendSyncResponse;
   },
 
   async planRoute(

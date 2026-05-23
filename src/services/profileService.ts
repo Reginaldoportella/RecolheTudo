@@ -1,7 +1,11 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { collectionsService } from "./collectionsService";
-import type { DailySummary } from "../domain/types/collection";
+import type {
+  DailySummary,
+  MaterialsSummary,
+  ProductivitySummary,
+} from "../domain/types/collection";
 
 const GOAL_KEY = "profile_goal_daily_kg";
 const DEFAULT_GOAL = 20;
@@ -10,18 +14,8 @@ const DAYS = 7;
 export interface ProfileDashboard {
   goalKg: number;
   weeklySummaries: DailySummary[];
-}
-
-function getPastDates(count: number): string[] {
-  const dates: string[] = [];
-
-  for (let i = count - 1; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    dates.push(d.toISOString().slice(0, 10));
-  }
-
-  return dates;
+  productivitySummary: ProductivitySummary;
+  materialsSummary: MaterialsSummary;
 }
 
 export const profileService = {
@@ -31,12 +25,19 @@ export const profileService = {
     const stored = await AsyncStorage.getItem(GOAL_KEY);
     const parsedGoal = stored ? parseFloat(stored) : DEFAULT_GOAL;
     const goalKg = Number.isNaN(parsedGoal) ? DEFAULT_GOAL : parsedGoal;
-    const dates = getPastDates(DAYS);
-    const weeklySummaries = await Promise.all(
-      dates.map((date) => collectionsService.getDailySummary(date)),
-    );
+    const today = new Date().toISOString().slice(0, 10);
+    const [weeklySummary, productivitySummary, materialsSummary] = await Promise.all([
+      collectionsService.getWeeklySummary(today),
+      collectionsService.getProductivitySummary("weekly", today),
+      collectionsService.getMaterialsSummary("weekly", today),
+    ]);
 
-    return { goalKg, weeklySummaries };
+    return {
+      goalKg,
+      weeklySummaries: weeklySummary.dailySummaries,
+      productivitySummary,
+      materialsSummary,
+    };
   },
 
   async saveDailyGoal(goalKg: number): Promise<void> {

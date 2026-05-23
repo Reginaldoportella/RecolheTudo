@@ -90,7 +90,9 @@ export async function initDatabase() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS collections (
       remote_id TEXT PRIMARY KEY,
-      local_id INTEGER NULL,
+      local_id TEXT NULL,
+      user_id TEXT NULL,
+      device_id TEXT NULL,
       material TEXT NOT NULL CHECK (material IN ('papel', 'plastico', 'metal', 'vidro', 'outros')),
       weight_kg DOUBLE PRECISION NOT NULL CHECK (weight_kg > 0),
       collected_at TIMESTAMPTZ NOT NULL,
@@ -100,13 +102,52 @@ export async function initDatabase() {
       location_accuracy DOUBLE PRECISION NULL,
       notes TEXT NULL,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      deleted_at TIMESTAMPTZ NULL
+      deleted_at TIMESTAMPTZ NULL,
+      synced_at TIMESTAMPTZ NULL,
+      sync_version BIGINT NOT NULL DEFAULT 1,
+      server_updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      sync_metadata JSONB NOT NULL DEFAULT '{}'::jsonb
     );
+  `);
+
+  await pool.query(`
+    ALTER TABLE collections
+      ALTER COLUMN local_id TYPE TEXT USING local_id::text;
+  `);
+
+  await pool.query(`
+    ALTER TABLE collections
+      ADD COLUMN IF NOT EXISTS user_id TEXT NULL,
+      ADD COLUMN IF NOT EXISTS device_id TEXT NULL,
+      ADD COLUMN IF NOT EXISTS synced_at TIMESTAMPTZ NULL,
+      ADD COLUMN IF NOT EXISTS sync_version BIGINT NOT NULL DEFAULT 1,
+      ADD COLUMN IF NOT EXISTS server_updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      ADD COLUMN IF NOT EXISTS sync_metadata JSONB NOT NULL DEFAULT '{}'::jsonb;
   `);
 
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_collections_collected_at
       ON collections (collected_at DESC);
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_collections_deleted_at
+      ON collections (deleted_at);
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_collections_device_id
+      ON collections (device_id);
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_collections_user_id
+      ON collections (user_id);
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_collections_server_updated_at
+      ON collections (server_updated_at DESC);
   `);
 
   await pool.query(`
@@ -127,6 +168,11 @@ export async function query(text, params = []) {
   }
 
   return pool.query(text, params);
+}
+
+export async function isDatabaseReady() {
+  await query("SELECT 1;");
+  return true;
 }
 
 export async function inspectState(collectionPointsCount) {

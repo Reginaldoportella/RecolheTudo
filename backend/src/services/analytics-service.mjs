@@ -1,4 +1,8 @@
-import { getDailySummary as getDailySummaryFromDb } from "../data/collections-repository.mjs";
+import {
+  getDailySummary as getDailySummaryFromDb,
+  getMaterialsSummary as getMaterialsSummaryFromDb,
+  getProductivitySummary as getProductivitySummaryFromDb,
+} from "../data/collections-repository.mjs";
 
 export async function getDailySummary(date) {
   return getDailySummaryFromDb(date);
@@ -16,6 +20,10 @@ export async function getWeeklySummary(referenceDate) {
     dailySummaries.push(await getDailySummary(day.toISOString().slice(0, 10)));
   }
 
+  return buildWeeklySummary(referenceDate, dailySummaries);
+}
+
+export function buildWeeklySummary(referenceDate, dailySummaries) {
   return {
     startDate: dailySummaries[0]?.date ?? referenceDate,
     endDate: dailySummaries.at(-1)?.date ?? referenceDate,
@@ -26,4 +34,20 @@ export async function getWeeklySummary(referenceDate) {
     ),
     dailySummaries,
   };
+}
+
+export async function getAnalyticsSummary(period, date) {
+  if (period === "daily") {
+    return getDailySummary(date);
+  }
+
+  return getWeeklySummary(date);
+}
+
+export async function getAnalyticsMaterials(period, date) {
+  return getMaterialsSummaryFromDb(date, period);
+}
+
+export async function getAnalyticsProductivity(period, date) {
+  return getProductivitySummaryFromDb(date, period);
 }

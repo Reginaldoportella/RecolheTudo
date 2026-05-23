@@ -1,6 +1,7 @@
 import env from "../config/env.mjs";
 import { insertRouteRun } from "../data/collections-repository.mjs";
 import { calculateDistanceMeters } from "../utils/distance.mjs";
+import { validateRoutePlanPayload } from "../schemas/route-schema.mjs";
 
 const OSRM_BASE_URL = "https://router.project-osrm.org";
 const OSRM_PROFILE = "driving";
@@ -82,32 +83,46 @@ async function fetchRoute(coordinates) {
   return response.json();
 }
 
+function buildRouteResult({
+  provider,
+  orderedPoints,
+  polyline = null,
+  distanceMeters = null,
+  durationSeconds = null,
+  fallback = false,
+}) {
+  return {
+    provider,
+    orderedPoints,
+    polyline,
+    distanceMeters,
+    durationSeconds,
+    fallback,
+  };
+}
+
 export async function planRoute(payload) {
-  const origin = payload?.origin ?? null;
-  const destinations = Array.isArray(payload?.destinations)
-    ? payload.destinations
+  const safePayload = validateRoutePlanPayload(payload);
+  const origin = safePayload.origin ?? null;
+  const destinations = Array.isArray(safePayload.destinations)
+    ? safePayload.destinations
     : [];
 
   if (!origin || destinations.length === 0) {
-    return {
+    return buildRouteResult({
       provider: "none",
       orderedPoints: destinations,
-      polyline: null,
-      distanceMeters: null,
-      durationSeconds: null,
-    };
+    });
   }
 
   const coordinates = [origin, ...destinations];
 
   if (!env.useOsrm) {
-    return {
+    return buildRouteResult({
       provider: "none",
       orderedPoints: destinations,
-      polyline: null,
-      distanceMeters: null,
-      durationSeconds: null,
-    };
+      fallback: true,
+    });
   }
 
   try {
@@ -122,13 +137,14 @@ export async function planRoute(payload) {
     const routeResponse = await fetchRoute(orderedCoordinates);
     const firstRoute = routeResponse.routes?.[0] ?? null;
 
-    const result = {
+    const result = buildRouteResult({
       provider: "osrm",
       orderedPoints,
       polyline: firstRoute?.geometry ?? null,
       distanceMeters: firstRoute?.distance ?? null,
       durationSeconds: firstRoute?.duration ?? null,
-    };
+      fallback: false,
+    });
 
     await insertRouteRun({
       createdAt: new Date().toISOString(),
@@ -140,12 +156,10 @@ export async function planRoute(payload) {
 
     return result;
   } catch {
-    return {
+    return buildRouteResult({
       provider: "none",
       orderedPoints: destinations,
-      polyline: null,
-      distanceMeters: null,
-      durationSeconds: null,
-    };
+      fallback: true,
+    });
   }
 }
