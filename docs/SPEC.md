@@ -1,7 +1,7 @@
-# SPEC Técnica - RecolheTudo
+# SPEC Tecnica - RecolheTudo
 
-Data: 17-05-2026  
-Status: atualizado para refletir a base atual
+Data: 20-05-2026  
+Status: atualizada para refletir o estado atual do cliente e da API
 
 ## 1. Stack atual
 
@@ -10,7 +10,7 @@ Status: atualizado para refletir a base atual
 - Expo SDK 53
 - React Native 0.79
 - React 19
-- TypeScript
+- TypeScript strict
 - Zustand
 - expo-sqlite
 - expo-location
@@ -27,6 +27,7 @@ Status: atualizado para refletir a base atual
 ### Qualidade
 
 - Jest
+- `node --test` no backend
 - `tsc --noEmit`
 
 ## 2. Arquitetura atual
@@ -51,18 +52,20 @@ Screen
 
 ```text
 HTTP server
+  -> middleware opcional de auth context
+  -> schemas e validadores
   -> services
   -> repository PostgreSQL
   -> PostgreSQL
 
 collection points
-  -> seed em memória
+  -> seed em memoria
 
 route planning
   -> OSRM com fallback
 ```
 
-## 3. Navegação e telas
+## 3. Navegacao e telas
 
 Tabs atuais em `src/navigation/AppNavigator.tsx`:
 
@@ -72,18 +75,19 @@ Tabs atuais em `src/navigation/AppNavigator.tsx`:
 - `Rotas`
 - `Perfil`
 
-### 3.1 Início
+### 3.1 Inicio
 
 Responsabilidades:
 
-- carregar resumo diário
+- carregar resumo diario
 - carregar resumo semanal
 - exibir cards por material
 - abrir atalhos para `Coleta`, `Rotas` e `Historico`
 
 Fonte atual dos dados:
 
-- SQLite local via `useCollectionsStore`
+- tenta backend para analytics
+- cai para SQLite local se a API falhar
 
 ### 3.2 Coleta
 
@@ -92,11 +96,11 @@ Responsabilidades:
 - escolher material
 - escolher faixa de peso
 - confirmar registro
-- solicitar localização
+- solicitar localizacao
 - salvar localmente
 - disparar sync best-effort
 
-### 3.3 Histórico
+### 3.3 Historico
 
 Responsabilidades:
 
@@ -109,21 +113,21 @@ Responsabilidades:
 
 Responsabilidades:
 
-- carregar localização atual quando disponível
-- buscar pontos próximos
-- planejar rota via backend quando disponível
-- abrir navegação externa no Google Maps
+- carregar localizacao atual quando disponivel
+- buscar pontos proximos
+- planejar rota via backend quando disponivel
+- abrir navegacao externa no Google Maps
 
 ### 3.5 Perfil
 
 Responsabilidades:
 
-- meta diária local
+- meta diaria local
 - resumo semanal
-- inspeção do banco local
+- status offline
 - leitura de health do backend
 
-## 4. Persistência local
+## 4. Persistencia local
 
 Arquivo central:
 
@@ -156,14 +160,14 @@ Campos importantes em `collections`:
 
 ## 5. Sync offline-first
 
-### Estratégia atual
+### Estrategia atual
 
-1. coleta é salva primeiro no SQLite
-2. uma entrada é criada em `sync_queue`
+1. coleta e salva primeiro no SQLite
+2. uma entrada e criada em `sync_queue`
 3. `collectionsSyncService` tenta drenar a fila
-4. falhas remotas não bloqueiam a UX
+4. falhas remotas nao bloqueiam a UX
 
-### Operações de fila
+### Operacoes de fila
 
 - `upsert`
 - `delete`
@@ -184,25 +188,40 @@ Config:
 
 - `backend/src/config/env.mjs`
 
+Middleware e utilitarios:
+
+- `backend/src/middleware/auth-context.mjs`
+- `backend/src/utils/request-id.mjs`
+- `backend/src/utils/logger.mjs`
+- `backend/src/utils/http-error.mjs`
+
 ### Endpoints
 
 - `GET /health`
-- `POST /v1/collections/sync`
-- `GET /v1/collections`
-- `DELETE /v1/collections/:remoteId`
+- `GET /ready`
+- `POST /v1/sync`
 - `GET /v1/collection-points/nearby`
 - `POST /v1/routes/plan`
 - `GET /v1/analytics/daily-summary`
 - `GET /v1/analytics/weekly-summary`
+- `GET /v1/analytics/summary`
+- `GET /v1/analytics/materials`
+- `GET /v1/analytics/productivity`
 
-### Persistência do backend
+### Endpoints legados despublicados
+
+- `POST /v1/collections/sync`
+- `GET /v1/collections`
+- `DELETE /v1/collections/:remoteId`
+
+### Persistencia do backend
 
 PostgreSQL atual:
 
 - `collections`
 - `route_runs`
 
-Seeds ainda em memória:
+Seeds ainda em memoria:
 
 - pontos de coleta base
 
@@ -210,40 +229,45 @@ Seeds ainda em memória:
 
 Backend:
 
-- usa OSRM quando disponível
-- faz fallback para `provider: "none"` se houver falha
+- usa OSRM quando disponivel
+- faz fallback com `provider: "none"` e `fallback: true` quando houver falha
 
 Cliente:
 
 - consome rota planejada
-- exibe resumo de distância/duração
+- exibe resumo de distancia e duracao
 - permite abrir Google Maps com destino selecionado
 
 ## 8. Analytics
 
 ### Atual no cliente
 
-- dashboard principal ainda é carregado do SQLite local
-- perfil também usa leitura local
+- dashboard principal tenta backend primeiro para analytics
+- se a API falhar, cai para SQLite local
+- o app continua offline-first
 
 ### Atual no backend
 
-- existem endpoints para resumo diário e semanal
-- o backend já persiste coleções e calcula agregações
+- existem endpoints para resumo diario e semanal
+- existe `summary` flexivel por periodo
+- existe `materials`
+- existe `productivity`
+- o backend persiste colecoes e calcula agregacoes
 
 ### Gap conhecido
 
-- ainda há inconsistências observadas entre `sync`, `GET /collections` e analytics
-- por isso o backend ainda não pode ser tratado como fonte canônica estável
+- autenticacao completa ainda nao existe
+- `user_id` e `device_id` ja estao preparados, mas sem JWT obrigatorio
+- reconciliacao de conflitos ainda esta em nivel MVP
 
-## 9. Configuração e segurança
+## 9. Configuracao e seguranca
 
 ### Arquivos de ambiente
 
 - `.env.example` versionado
 - `.env` apenas local
 
-Variáveis relevantes:
+Variaveis relevantes:
 
 - `EXPO_PUBLIC_API_BASE_URL`
 - `POSTGRES_DB`
@@ -255,9 +279,9 @@ Variáveis relevantes:
 
 ### Regras
 
-- não versionar `.env`
-- não versionar bancos locais
-- não hardcodar credenciais reais em código ou docs
+- nao versionar `.env`
+- nao versionar bancos locais
+- nao hardcodar credenciais reais em codigo ou docs
 
 ## 10. Docker e infraestrutura
 
@@ -265,7 +289,7 @@ Arquivo principal:
 
 - `docker-compose.yml`
 
-Serviços:
+Servicos:
 
 - `postgres`
 - `backend`
@@ -293,9 +317,10 @@ npm run web
 ```powershell
 npm run backend:dev
 npm run backend:check
+npm --prefix backend run test
 ```
 
-### Validação
+### Validacao
 
 ```powershell
 npm run typecheck
@@ -304,28 +329,32 @@ npm run test:run
 
 ## 12. Testes atuais
 
-Cobertura existente em alto nível:
+Cobertura existente em alto nivel:
 
-- validação de coleta
-- repositório de coletas
+- validacao de coleta
+- repositorio de coletas
 - pontos de rota
 - pontos de coleta
 - sync de pontos de reciclagem
 - store de coletas
-- utilitários de mapas
+- utilitarios de mapas
+- sync do cliente
+- readiness do backend
+- sync do backend
+- analytics de backend
+- fallback de rota
 
-## 13. Limitações e débitos técnicos conhecidos
+## 13. Limitacoes e debitos tecnicos conhecidos
 
-- lógica de `sync`, `list` e `analytics` no backend ainda precisa revisão
-- exclusão remota ainda não está pronta como tombstone distribuído robusto
-- autenticação ainda não existe
-- observabilidade estruturada ainda não existe
+- JWT ainda nao esta ativo
+- conflitos de sync ainda estao em nivel MVP
 - pontos de coleta do backend ainda dependem parcialmente de seeds
+- analytics `materials` e `productivity` ainda nao sao consumidos pelas telas
 
-## 14. Próximas correções prioritárias
+## 14. Proximas correcoes prioritarias
 
-1. estabilizar backend de coleções
-2. alinhar sync com listagem e analytics
-3. revisar identidade remota e exclusão
-4. mover consumo de analytics do cliente para a API
-5. adicionar autenticação e observabilidade
+1. consolidar `materials` e `productivity` no cliente quando fizer sentido
+2. evoluir reconciliacao de conflitos
+3. adicionar middleware real de autenticacao com JWT
+4. revisar escopo por usuario/device
+5. fortalecer observabilidade e testes HTTP de integracao
